@@ -281,8 +281,16 @@ class PortfolioDataManagerPro:
     
     @staticmethod
     @st.cache_data(ttl=3600, show_spinner=False)
-    def fetch_portfolio_data(tickers: List[str], benchmark: str, 
-                             start_date: datetime, end_date: datetime) -> Tuple[pd.DataFrame, pd.Series]:
+    def fetch_portfolio_data(
+        tickers: List[str],
+        benchmark: str, 
+        start_date: datetime,
+        end_date: datetime
+    ) -> Tuple[pd.DataFrame, pd.Series]:
+        """
+        Fetch portfolio and benchmark prices for the given window.
+        Drops assets that have no data at all in this window.
+        """
         all_tickers = list(set(tickers + [benchmark]))
         try:
             data = yf.download(
@@ -301,27 +309,38 @@ class PortfolioDataManagerPro:
                 for ticker in all_tickers:
                     try:
                         df = data.xs(ticker, axis=1, level=0, drop_level=True)
-                        if 'Close' in df.columns:
+                        if 'Close' in df.columns and not df['Close'].dropna().empty:
                             if ticker == benchmark:
                                 benchmark_prices = df['Close']
                             elif ticker in tickers:
                                 prices[ticker] = df['Close']
                     except KeyError:
+                        # No column for this ticker in the period -> skip
                         continue
             else:
-                if 'Close' in data.columns:
+                # Single-ticker case
+                if 'Close' in data.columns and not data['Close'].dropna().empty:
                     if len(all_tickers) == 1:
                         if all_tickers[0] == benchmark:
                             benchmark_prices = data['Close']
                         else:
                             prices[all_tickers[0]] = data['Close']
             
+            # Forward/backward fill to close small gaps,
+            # then drop assets that are still fully NaN
             prices = prices.ffill().bfill()
+            prices = prices.dropna(how='all', axis=1)
             benchmark_prices = benchmark_prices.ffill().bfill()
+            
+            if prices.empty:
+                raise ValueError("No price data for portfolio assets in this period")
+            if benchmark_prices.empty:
+                raise ValueError("No price data for benchmark in this period")
             
             common_idx = prices.index.intersection(benchmark_prices.index)
             if len(common_idx) == 0:
                 raise ValueError("Portfolio and benchmark dates do not overlap")
+            
             return prices.loc[common_idx], benchmark_prices.loc[common_idx]
         except Exception as e:
             raise Exception(f"Data fetch error: {str(e)}")
@@ -332,14 +351,40 @@ class PortfolioDataManagerPro:
         benchmark_prices: pd.Series,
         method: str = 'log'
     ) -> Tuple[pd.DataFrame, pd.Series]:
+        """
+        Compute portfolio and benchmark returns with robust NaN handling:
+        - Drops rows where ALL assets are NaN
+        - Drops asset columns that are ALL NaN
+        - Keeps days where at least one asset has a valid return
+        """
+        if prices.empty or benchmark_prices.empty:
+            return pd.DataFrame(), pd.Series(dtype=float)
+
         if method == 'log':
-            portfolio_returns = np.log(prices / prices.shift(1)).dropna()
-            benchmark_returns = np.log(benchmark_prices / benchmark_prices.shift(1)).dropna()
+            port_raw = np.log(prices / prices.shift(1))
+            bench_raw = np.log(benchmark_prices / benchmark_prices.shift(1))
         else:
-            portfolio_returns = prices.pct_change().dropna()
-            benchmark_returns = benchmark_prices.pct_change().dropna()
-        common_idx = portfolio_returns.index.intersection(benchmark_returns.index)
-        return portfolio_returns.loc[common_idx], benchmark_returns.loc[common_idx]
+            port_raw = prices.pct_change()
+            bench_raw = benchmark_prices.pct_change()
+
+        # Drop rows where ALL assets are NaN (keep partial rows)
+        port_ret = port_raw.dropna(how='all')
+        # Drop asset columns that are ALL NaN in this window
+        port_ret = port_ret.dropna(how='all', axis=1)
+
+        # Benchmark: simple drop of missing days
+        bench_ret = bench_raw.dropna()
+
+        # Align on common dates
+        common_idx = port_ret.index.intersection(bench_ret.index)
+        if len(common_idx) == 0:
+            return pd.DataFrame(), pd.Series(dtype=float)
+
+        port_ret = port_ret.loc[common_idx]
+        bench_ret = bench_ret.loc[common_idx]
+
+        return port_ret, bench_ret
+
 
 # ============================================================================
 # 2. ADVANCED PORTFOLIO OPTIMIZATION
