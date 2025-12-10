@@ -836,6 +836,9 @@ class PortfolioBacktesterPro:
 # ============================================================================
 # 6. SCENARIO STRESS TESTING (NEW)
 # ============================================================================
+# ============================================================================
+# 6. SCENARIO STRESS TESTING (UPDATED & ROBUST)
+# ============================================================================
 
 class ScenarioStressTester:
     """Handles historical simulation with dynamic renormalization."""
@@ -860,33 +863,69 @@ class ScenarioStressTester:
             try:
                 start = datetime.strptime(start_str, '%Y-%m-%d')
                 end = datetime.strptime(end_str, '%Y-%m-%d')
-                prices, bench_prices = self.dm.fetch_portfolio_data(tickers, benchmark_ticker, start, end)
-                if prices.empty:
-                    results[scenario_name] = {'error': 'No data'}
+
+                # Fetch prices for that crisis window
+                prices, bench_prices = self.dm.fetch_portfolio_data(
+                    tickers, benchmark_ticker, start, end
+                )
+                if prices.empty or bench_prices.empty:
+                    results[scenario_name] = {'error': 'No price data in this period'}
                     continue
+
+                # Compute returns
                 returns, bench_returns = self.dm.calculate_returns(prices, bench_prices)
+                if returns.empty or bench_returns.empty:
+                    results[scenario_name] = {'error': 'No return data in this period'}
+                    continue
                 
-                # Dynamic Renormalization
+                # Dynamic renormalization on available assets
                 available_assets = [t for t in tickers if t in returns.columns]
-                original_coverage = sum(weights[t] for t in available_assets)
-                
+                if not available_assets:
+                    results[scenario_name] = {'error': 'No overlapping assets in this period'}
+                    continue
+
+                original_coverage = sum(weights.get(t, 0.0) for t in available_assets)
+                if original_coverage <= 0.0:
+                    results[scenario_name] = {'error': 'Zero effective weights for available assets'}
+                    continue
+
                 if original_coverage < 0.4:
                     results[scenario_name] = {
                         'error': f"Insufficient coverage ({original_coverage:.0%})"
                     }
                     continue
                 
-                normalized_weights = np.array([weights[t] for t in available_assets]) / original_coverage
-                scenario_returns = returns[available_assets].dot(normalized_weights)
-                cumulative_portfolio = (1 + scenario_returns).cumprod()
-                cumulative_benchmark = (1 + bench_returns).cumprod()
+                normalized_weights = (
+                    np.array([weights[t] for t in available_assets]) / original_coverage
+                )
 
-                max_dd = ((cumulative_portfolio - cumulative_portfolio.expanding().max())
-                          / cumulative_portfolio.expanding().max()).min()
-                
+                # Scenario returns
+                scenario_returns = returns[available_assets].dot(normalized_weights)
+                if scenario_returns.empty:
+                    results[scenario_name] = {'error': 'No scenario returns for this period'}
+                    continue
+
+                cumulative_portfolio = (1 + scenario_returns).cumprod()
+                if cumulative_portfolio.empty:
+                    results[scenario_name] = {'error': 'Empty cumulative portfolio series'}
+                    continue
+
+                # Benchmark cumulative
+                if bench_returns.empty:
+                    cumulative_benchmark = pd.Series(dtype=float)
+                    bench_total_return = 0.0
+                else:
+                    cumulative_benchmark = (1 + bench_returns).cumprod()
+                    bench_total_return = (1 + bench_returns).prod() - 1
+
+                # Max drawdown
+                running_max = cumulative_portfolio.cummax()
+                dd = (cumulative_portfolio - running_max) / running_max
+                max_dd = dd.min() if not dd.empty else 0.0
+
                 results[scenario_name] = {
-                    'portfolio_return': cumulative_portfolio.iloc[-1] - 1,
-                    'benchmark_return': (1 + bench_returns).prod() - 1,
+                    'portfolio_return': float(cumulative_portfolio.iloc[-1] - 1),
+                    'benchmark_return': float(bench_total_return),
                     'max_drawdown': float(max_dd),
                     'coverage': float(original_coverage),
                     'surviving_assets': len(available_assets),
@@ -894,6 +933,7 @@ class ScenarioStressTester:
                     'benchmark_series': cumulative_benchmark
                 }
             except Exception as e:
+                self.logger.error(f"Stress test error for {scenario_name}: {e}")
                 results[scenario_name] = {'error': str(e)}
         return results
 
@@ -915,6 +955,8 @@ class ScenarioStressTester:
                 'Portfolio Beta': portfolio_beta
             })
         return pd.DataFrame(data)
+
+
 
 # ============================================================================
 # 7. VISUALIZATION ENGINE
