@@ -2096,18 +2096,44 @@ class AdvancedPortfolioOptimizer:
     """Advanced portfolio optimization with multiple algorithms and constraints."""
     
     def __init__(self):
-        self.optimization_methods = {
-            'MAX_SHARPE': self._optimize_max_sharpe,
-            'MIN_VARIANCE': self._optimize_min_variance,
-            'MAX_RETURN': self._optimize_max_return,
-            'RISK_PARITY': self._optimize_risk_parity,
-            'MAX_DIVERSIFICATION': self._optimize_max_diversification,
-            'HRP': self._optimize_hierarchical_risk_parity,
-            'BLACK_LITTERMAN': self._optimize_black_litterman,
-            'MEAN_CVAR': self._optimize_mean_cvar,
-            'MEAN_VARIANCE_SEMI': self._optimize_mean_variance_semi,
-            'ROBUST_OPTIMIZATION': self._optimize_robust
-        }
+        """Initialize available optimization methods safely.
+
+        This avoids AttributeError at import time if some methods are not defined
+        in this deployment (e.g. experimental methods removed or commented out).
+        """
+        methods = {}
+
+        if hasattr(self, "_optimize_max_sharpe"):
+            methods["MAX_SHARPE"] = self._optimize_max_sharpe
+
+        if hasattr(self, "_optimize_min_variance"):
+            methods["MIN_VARIANCE"] = self._optimize_min_variance
+
+        if hasattr(self, "_optimize_max_return"):
+            methods["MAX_RETURN"] = self._optimize_max_return
+
+        if hasattr(self, "_optimize_risk_parity"):
+            methods["RISK_PARITY"] = self._optimize_risk_parity
+
+        if hasattr(self, "_optimize_max_diversification"):
+            methods["MAX_DIVERSIFICATION"] = self._optimize_max_diversification
+
+        if hasattr(self, "_optimize_hierarchical_risk_parity"):
+            methods["HRP"] = self._optimize_hierarchical_risk_parity
+
+        if hasattr(self, "_optimize_black_litterman"):
+            methods["BLACK_LITTERMAN"] = self._optimize_black_litterman
+
+        if hasattr(self, "_optimize_mean_cvar"):
+            methods["MEAN_CVAR"] = self._optimize_mean_cvar
+
+        if hasattr(self, "_optimize_mean_variance_semi"):
+            methods["MEAN_VARIANCE_SEMI"] = self._optimize_mean_variance_semi
+
+        if hasattr(self, "_optimize_robust"):
+            methods["ROBUST_OPTIMIZATION"] = self._optimize_robust
+
+        self.optimization_methods = methods
     
     def optimize_portfolio(self, returns: pd.DataFrame, 
                           method: str = 'MAX_SHARPE',
@@ -4016,17 +4042,17 @@ ui = SmartUIComponents()
 
 class QuantEdgeProEnhanced:
     """Enhanced QuantEdge Pro application with all advanced features."""
-    
+
     def __init__(self):
         self.data_manager = data_manager
         self.risk_analytics = risk_analytics
         self.portfolio_optimizer = portfolio_optimizer
         self.viz_engine = viz_engine
         self.ui = ui
-        
+
         # Initialize session state with ALL required keys
         self._initialize_session_state()
-    
+
     def _initialize_session_state(self):
         """Initialize ALL session state variables with proper defaults."""
         # Data storage
@@ -4040,7 +4066,7 @@ class QuantEdgeProEnhanced:
                 'returns_clean': pd.DataFrame(),
                 'prices_clean': pd.DataFrame()
             }
-        
+
         # Optimization results
         if 'optimization_results' not in st.session_state:
             st.session_state.optimization_results = {
@@ -4051,7 +4077,7 @@ class QuantEdgeProEnhanced:
                 'risk_free_rate': 0.045,
                 'timestamp': ''
             }
-        
+
         # Risk analysis
         if 'risk_analysis_results' not in st.session_state:
             st.session_state.risk_analysis_results = {
@@ -4062,7 +4088,7 @@ class QuantEdgeProEnhanced:
                 'backtest': {},
                 'stress_tests': {}
             }
-        
+
         # Analysis state
         if 'current_step' not in st.session_state:
             st.session_state.current_step = 0
@@ -4070,7 +4096,7 @@ class QuantEdgeProEnhanced:
             st.session_state.analysis_complete = False
         if 'config' not in st.session_state:
             st.session_state.config = {}
-    
+
     # ----------------------------------------------------------------------
     # SAFE ACCESS HELPERS
     # ----------------------------------------------------------------------
@@ -4089,7 +4115,7 @@ class QuantEdgeProEnhanced:
             elif data is not None:
                 return data
         return default
-    
+
     def _safe_get_returns(self) -> pd.DataFrame:
         """Safely get returns data with validation."""
         returns = self._safe_get_data('returns_clean')
@@ -4099,7 +4125,7 @@ class QuantEdgeProEnhanced:
             # Create empty dataframe with proper structure
             returns = pd.DataFrame()
         return returns
-    
+
     def _safe_get_prices(self) -> pd.DataFrame:
         """Safely get prices data with validation."""
         prices = self._safe_get_data('prices_clean')
@@ -4653,7 +4679,7 @@ class QuantEdgeProEnhanced:
         - **Y-axis**: Portfolio Return
         - **Z-axis**: Sharpe Ratio
         - **Color**: Sharpe Ratio (higher = better)
-        
+
         The efficient frontier line shows optimal portfolios that maximize return for a given level of risk.
         """)
 
@@ -4774,19 +4800,21 @@ class QuantEdgeProEnhanced:
 
             st.error("""
             ## 🚨 Application Error
-            
+
             The application encountered an unexpected error. Please try:
-            
+
             1. Refreshing the page
             2. Reducing the number of assets
             3. Adjusting the date range
             4. Checking your internet connection
-            
+
             If the problem persists, please contact support.
             """)
-            
+
             with st.expander("Technical Details", expanded=False):
                 error_analyzer.create_advanced_error_display(error_analysis)
+
+
 # 9. MAIN EXECUTION
 # ============================================================================
 
