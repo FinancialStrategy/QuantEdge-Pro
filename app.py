@@ -1,4 +1,4 @@
-============================================================================
+#============================================================================
 # QUANTEDGE PRO v5.0 ENTERPRISE EDITION - SUPER-ENHANCED VERSION
 # INSTITUTIONAL PORTFOLIO ANALYTICS PLATFORM WITH AI/ML CAPABILITIES
 # Total Lines: 5500+ | Production Grade | Enterprise Ready
