@@ -1,6 +1,6 @@
 # ============================================================================
 # QUANTEDGE MK | INSTITUTIONAL PORTFOLIO TERMINAL (ADVANCED MONOLITHIC VERSION)
-# Version: v3.2 Pro Plus (AI + Advanced Risk + Stress Testing + Reporting Integrated)
+# Version: v3.3 Pro Plus (AI + Advanced Risk + Stress Testing + Reporting)
 # Production Level | Institutional Class
 # ============================================================================
 
@@ -13,7 +13,6 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
 import warnings
-import concurrent.futures
 from typing import Dict, List, Tuple, Optional, Any
 from dataclasses import dataclass
 import logging
@@ -25,7 +24,7 @@ class LibraryManager:
     @staticmethod
     def check_libraries():
         """Check for necessary libraries."""
-        lib_status = {}
+        lib_status: Dict[str, bool] = {}
         
         # PyPortfolioOpt
         try:
@@ -85,7 +84,7 @@ st.set_page_config(
     menu_items={
         'Get Help': 'https://quantedge.pro',
         'Report a bug': 'https://github.com/quantedge/issues',
-        'About': "QuantEdge Pro v3.2 - Institutional Portfolio Analysis Platform"
+        'About': "QuantEdge Pro v3.3 - Institutional Portfolio Analysis Platform"
     }
 )
 
@@ -129,15 +128,16 @@ st.markdown("""
     }
     .positive { background: rgba(0, 204, 150, 0.15); color: #00cc96 !important; border: 1px solid rgba(0, 204, 150, 0.3); }
     .negative { background: rgba(239, 85, 59, 0.15); color: #ef553b !important; border: 1px solid rgba(239, 85, 59, 0.3); }
-    .neutral { background: rgba(128, 128, 128, 0.15); color: #888 !important; border: 1px solid rgba(128, 128, 128, 0.3); }
+    .neutral  { background: rgba(128, 128, 128, 0.15); color: #888 !important; border: 1px solid rgba(128, 128, 128, 0.3); }
     .highlight-box {
         background: linear-gradient(135deg, rgba(30, 30, 30, 0.8), rgba(42, 42, 42, 0.8));
         border-left: 4px solid #00cc96; padding: 1.5rem; border-radius: 10px; margin: 1.5rem 0;
         backdrop-filter: blur(10px); border: 1px solid rgba(128, 128, 128, 0.15);
+        font-size: 0.95rem;
     }
     .section-header {
-        font-size: 1.8rem; font-weight: 800; color: white; margin: 2.5rem 0 1.5rem 0;
-        padding-bottom: 0.8rem; border-bottom: 2px solid linear-gradient(90deg, #00cc96, #636efa);
+        font-size: 1.4rem; font-weight: 700; color: white; margin: 1.0rem 0 0.75rem 0;
+        padding-bottom: 0.4rem; border-bottom: 1px solid rgba(255,255,255,0.08);
         position: relative;
     }
 </style>
@@ -147,7 +147,7 @@ st.markdown("""
 class Constants:
     """Constant values and configurations."""
     
-    ASSET_UNIVERSES = {
+    ASSET_UNIVERSES: Dict[str, Dict[str, Any]] = {
         "BIST 30": {
             "tickers": [
                 'AKBNK.IS', 'ARCLK.IS', 'ASELS.IS', 'BIMAS.IS', 'DOHOL.IS', 'EKGYO.IS',
@@ -180,7 +180,7 @@ class Constants:
         }
     }
     
-    SECTOR_CLASSIFICATION = {
+    SECTOR_CLASSIFICATION: Dict[str, List[str]] = {
         'Technology': ['AAPL', 'MSFT', 'GOOGL', 'NVDA', 'AMD', 'INTC', 'QCOM', 'CRM', 'ASML.AS'],
         'Financial Services': ['JPM', 'V', 'MA', 'GS', 'MS', 'AKBNK.IS', 'GARAN.IS', 'ISCTR.IS', 'YKBNK.IS'],
         'Consumer Cyclical': ['AMZN', 'TSLA', 'NKE', 'MCD', 'SBUX', 'NFLX', 'DIS'],
@@ -194,8 +194,7 @@ class Constants:
         'Communication': ['T', 'VZ', 'TCELL.IS']
     }
     
-    # Expanded Historical Crisis Scenarios
-    HISTORICAL_CRISES = {
+    HISTORICAL_CRISES: Dict[str, Tuple[str, str]] = {
         'Dot-com Bubble Burst (2000)': ('2000-03-10', '2002-10-09'),
         'September 11 Attacks (2001)': ('2001-09-10', '2001-10-31'),
         'Global Financial Crisis (2008)': ('2008-09-01', '2009-03-09'),
@@ -207,12 +206,12 @@ class Constants:
         'Banking Crisis (SVB) (2023)': ('2023-03-08', '2023-03-31')
     }
     
-    RISK_LEVELS = {
+    RISK_LEVELS: Dict[str, Dict[str, float]] = {
         'VERY CONSERVATIVE': {'color': '#00cc96', 'max_volatility': 0.08, 'max_drawdown': -0.10},
-        'CONSERVATIVE': {'color': '#636efa', 'max_volatility': 0.12, 'max_drawdown': -0.15},
-        'MODERATE': {'color': '#FFA15A', 'max_volatility': 0.18, 'max_drawdown': -0.20},
-        'AGGRESSIVE': {'color': '#ef553b', 'max_volatility': 0.25, 'max_drawdown': -0.30},
-        'VERY AGGRESSIVE': {'color': '#ab63fa', 'max_volatility': 0.35, 'max_drawdown': -0.40}
+        'CONSERVATIVE':      {'color': '#636efa', 'max_volatility': 0.12, 'max_drawdown': -0.15},
+        'MODERATE':          {'color': '#FFA15A', 'max_volatility': 0.18, 'max_drawdown': -0.20},
+        'AGGRESSIVE':        {'color': '#ef553b', 'max_volatility': 0.25, 'max_drawdown': -0.30},
+        'VERY AGGRESSIVE':   {'color': '#ab63fa', 'max_volatility': 0.35, 'max_drawdown': -0.40}
     }
 
 @dataclass
@@ -248,19 +247,19 @@ class EnhancedAssetClassifierPro:
         return logger
     
     def classify_tickers(self, tickers: List[str]) -> Dict[str, Dict]:
-        classifications = {}
+        classifications: Dict[str, Dict] = {}
         for ticker in tickers:
             sector = self._get_sector_from_constants(ticker)
             classifications[ticker] = self._get_default_classification(ticker, sector)
         return classifications
     
     def _get_sector_from_constants(self, ticker: str) -> Optional[str]:
-        for sector, tickers in Constants.SECTOR_CLASSIFICATION.items():
-            if ticker in tickers:
+        for sector, sec_tickers in Constants.SECTOR_CLASSIFICATION.items():
+            if ticker in sec_tickers:
                 return sector
         return None
     
-    def _get_default_classification(self, ticker: str, sector: Optional[str] = None) -> Dict:
+    def _get_default_classification(self, ticker: str, sector: Optional[str] = None) -> Dict[str, Any]:
         if not sector:
             sector = 'Other'
         return {'ticker': ticker, 'sector': sector, 'industry': 'Unknown', 'full_name': ticker}
@@ -268,7 +267,7 @@ class EnhancedAssetClassifierPro:
 class PortfolioDataManagerPro:
     """Advanced data management and caching system."""
     def __init__(self):
-        self.cache = {}
+        self.cache: Dict[str, Any] = {}
         self.logger = self._setup_logger()
     
     def _setup_logger(self):
@@ -315,10 +314,8 @@ class PortfolioDataManagerPro:
                             elif ticker in tickers:
                                 prices[ticker] = df['Close']
                     except KeyError:
-                        # No column for this ticker in the period -> skip
                         continue
             else:
-                # Single-ticker case
                 if 'Close' in data.columns and not data['Close'].dropna().empty:
                     if len(all_tickers) == 1:
                         if all_tickers[0] == benchmark:
@@ -326,8 +323,6 @@ class PortfolioDataManagerPro:
                         else:
                             prices[all_tickers[0]] = data['Close']
             
-            # Forward/backward fill to close small gaps,
-            # then drop assets that are still fully NaN
             prices = prices.ffill().bfill()
             prices = prices.dropna(how='all', axis=1)
             benchmark_prices = benchmark_prices.ffill().bfill()
@@ -367,15 +362,10 @@ class PortfolioDataManagerPro:
             port_raw = prices.pct_change()
             bench_raw = benchmark_prices.pct_change()
 
-        # Drop rows where ALL assets are NaN (keep partial rows)
         port_ret = port_raw.dropna(how='all')
-        # Drop asset columns that are ALL NaN in this window
         port_ret = port_ret.dropna(how='all', axis=1)
-
-        # Benchmark: simple drop of missing days
         bench_ret = bench_raw.dropna()
 
-        # Align on common dates
         common_idx = port_ret.index.intersection(bench_ret.index)
         if len(common_idx) == 0:
             return pd.DataFrame(), pd.Series(dtype=float)
@@ -384,7 +374,6 @@ class PortfolioDataManagerPro:
         bench_ret = bench_ret.loc[common_idx]
 
         return port_ret, bench_ret
-
 
 # ============================================================================
 # 2. ADVANCED PORTFOLIO OPTIMIZATION
@@ -408,13 +397,13 @@ class AdvancedPortfolioOptimizerPro:
 
     def optimize(self, method: str, config: PortfolioConfig) -> Tuple[Dict, Tuple]:
         methods = {
-            'MAX_SHARPE': self._optimize_max_sharpe,
-            'MIN_VOLATILITY': self._optimize_min_volatility,
-            'RISK_PARITY': self._optimize_risk_parity,
+            'MAX_SHARPE':        self._optimize_max_sharpe,
+            'MIN_VOLATILITY':    self._optimize_min_volatility,
+            'RISK_PARITY':       self._optimize_risk_parity,
             'MAX_DIVERSIFICATION': self._optimize_max_diversification,
-            'HRP': self._optimize_hrp,
-            'EQUAL_WEIGHT': self._optimize_equal_weight,
-            'MEAN_VARIANCE': self._optimize_mean_variance
+            'HRP':               self._optimize_hrp,
+            'EQUAL_WEIGHT':      self._optimize_equal_weight,
+            'MEAN_VARIANCE':     self._optimize_mean_variance
         }
         try:
             return methods.get(method, self._optimize_equal_weight)(config)
@@ -452,7 +441,6 @@ class AdvancedPortfolioOptimizerPro:
             return self._optimize_equal_weight(config)
 
     def _optimize_max_diversification(self, config: PortfolioConfig) -> Tuple[Dict, Tuple]:
-        # Placeholder logic; can be upgraded to true maximum diversification ratio optimization.
         return self._optimize_equal_weight(config)
 
     def _optimize_hrp(self, config: PortfolioConfig) -> Tuple[Dict, Tuple]:
@@ -480,9 +468,8 @@ class AdvancedPortfolioOptimizerPro:
             if n == 0:
                 return {}, (0.0, 0.0, 0.0)
             bounds = [(0, 1) for _ in range(n)]
-            constraints = [{'type': 'eq', 'fun': lambda w: np.sum(w) - 1}]
+            constraints: List[Dict[str, Any]] = [{'type': 'eq', 'fun': lambda w: np.sum(w) - 1}]
             
-            # Sector constraints
             if config.constraints and 'sector_limits' in config.constraints:
                 local_classifier = EnhancedAssetClassifierPro()
                 for sector, (min_w, max_w) in config.constraints['sector_limits'].items():
@@ -518,7 +505,7 @@ class AdvancedPortfolioOptimizerPro:
         except Exception:
             return self._optimize_equal_weight(config)
 
-    def _calculate_performance(self, weights: Dict, risk_free_rate: float) -> Tuple:
+    def _calculate_performance(self, weights: Dict, risk_free_rate: float) -> Tuple[float, float, float]:
         if self.returns.empty:
             return (0.0, 0.0, 0.0)
         w = np.array([weights.get(t, 0) for t in self.returns.columns])
@@ -529,7 +516,7 @@ class AdvancedPortfolioOptimizerPro:
         return (ann_ret, ann_vol, sharpe)
 
 # ============================================================================
-# 3. ADVANCED RISK ANALYSIS
+# 3. ADVANCED RISK ANALYSIS (INCLUDING ADVANCED VaR / CVaR / ES)
 # ============================================================================
 
 class AdvancedRiskAnalyzerPro:
@@ -541,9 +528,9 @@ class AdvancedRiskAnalyzerPro:
         portfolio_returns: pd.Series,
         benchmark_returns: Optional[pd.Series] = None,
         risk_free_rate: float = 0.045
-    ) -> Dict:
+    ) -> Dict[str, Any]:
         """Calculate comprehensive risk metrics with English keys."""
-        metrics: Dict[str, float] = {}
+        metrics: Dict[str, Any] = {}
         try:
             pr = portfolio_returns.dropna()
             if pr.empty:
@@ -577,7 +564,6 @@ class AdvancedRiskAnalyzerPro:
             metrics['VaR 95%'] = float(var_95)
             metrics['CVaR 95%'] = float(cvar_95) if not np.isnan(cvar_95) else np.nan
 
-            # Benchmark annual return (geometric)
             bench_ann_ret = 0.0
             if benchmark_returns is not None:
                 br = benchmark_returns.dropna()
@@ -596,12 +582,10 @@ class AdvancedRiskAnalyzerPro:
             self.logger.error(f"Metric error: {e}")
             return metrics
 
-        # Separate Jarque–Bera block for robustness
         if len(portfolio_returns) > 20:
             try:
                 from scipy import stats
                 jb_result = stats.jarque_bera(portfolio_returns.dropna())
-                # SciPy may return a result object or tuple
                 stat = getattr(jb_result, 'statistic', None)
                 pvalue = getattr(jb_result, 'pvalue', None)
                 if stat is None and isinstance(jb_result, (list, tuple, np.ndarray)) and len(jb_result) >= 2:
@@ -613,6 +597,52 @@ class AdvancedRiskAnalyzerPro:
                 metrics['Jarque-Bera p-value'] = np.nan
 
         return metrics
+
+    def compute_advanced_var_metrics(self, returns: pd.Series) -> Dict[str, Any]:
+        """
+        Advanced VaR / CVaR / ES metrics:
+        - Historical VaR/CVaR at 95% and 99%
+        - Parametric Normal VaR/ES at 95% and 99%
+        - Rolling Historical VaR (63-day window) at 95% and 99%
+        """
+        adv: Dict[str, Any] = {}
+        pr = returns.dropna()
+        if pr.empty:
+            return adv
+
+        mu = pr.mean()
+        sigma = pr.std()
+        alphas = [0.95, 0.99]
+
+        try:
+            from scipy.stats import norm
+            have_norm = True
+        except ImportError:
+            have_norm = False
+            norm = None  # type: ignore
+
+        for alpha in alphas:
+            p = 1.0 - alpha
+            quantile = float(np.percentile(pr, p * 100))
+            adv[f'VaR {int(alpha*100)}% (Hist)'] = quantile
+            tail = pr[pr <= quantile]
+            adv[f'CVaR {int(alpha*100)}% (Hist)'] = float(tail.mean()) if not tail.empty else np.nan
+
+            if have_norm and sigma > 0:
+                z = float(norm.ppf(p))
+                var_norm = mu + sigma * z
+                es_norm = mu - sigma * norm.pdf(z) / p if p > 0 else np.nan
+                adv[f'VaR {int(alpha*100)}% (Normal)'] = float(var_norm)
+                adv[f'ES {int(alpha*100)}% (Normal)'] = float(es_norm)
+
+        window = 63
+        if len(pr) >= window:
+            for alpha in alphas:
+                p = 1.0 - alpha
+                rolling = pr.rolling(window).quantile(p).dropna()
+                adv[f'Rolling VaR {int(alpha*100)}% (Hist)'] = rolling
+
+        return adv
 
     def _calculate_max_drawdown_duration(self, drawdown: pd.Series) -> int:
         if drawdown.empty:
@@ -643,7 +673,6 @@ class AdvancedRiskAnalyzerPro:
             port_vol = np.sqrt(np.dot(w.T, np.dot(cov, w)))
             if port_vol == 0:
                 return pd.Series(0.0, index=returns.columns)
-            # 95% param VaR approximation
             z_score = 1.65
             marginal_contrib = np.dot(cov, w) / port_vol
             component_var = w * marginal_contrib * z_score
@@ -685,30 +714,30 @@ class EnhancedPerformanceAttributionPro:
         portfolio_weights: Dict,
         benchmark_weights: Dict,
         sector_map: Dict
-    ) -> Dict:
+    ) -> Dict[str, Any]:
         """Brinson-Fachler logic using full asset returns DataFrame."""
         try:
             if asset_returns.empty:
-                return {'allocation': 0.0, 'selection': 0.0, 'interaction': 0.0,
-                        'sector_breakdown': {}, 'total_excess': 0.0}
+                return {
+                    'allocation': 0.0, 'selection': 0.0, 'interaction': 0.0,
+                    'sector_breakdown': {}, 'total_excess': 0.0
+                }
 
             port_w = pd.Series(portfolio_weights).reindex(asset_returns.columns).fillna(0.0)
             bench_w = pd.Series(benchmark_weights).reindex(asset_returns.columns).fillna(0.0)
 
-            # Normalize to 1
             if port_w.sum() != 0:
                 port_w = port_w / port_w.sum()
             if bench_w.sum() != 0:
                 bench_w = bench_w / bench_w.sum()
 
-            # Portfolio and benchmark total returns for evaluation horizon
             port_total = (1 + asset_returns.dot(port_w)).prod() - 1
             if benchmark_returns is not None:
                 bench_total = (1 + benchmark_returns).prod() - 1
             else:
                 bench_total = (1 + asset_returns.dot(bench_w)).prod() - 1
 
-            results = {
+            results: Dict[str, Any] = {
                 'allocation': 0.0,
                 'selection': 0.0,
                 'interaction': 0.0,
@@ -726,7 +755,6 @@ class EnhancedPerformanceAttributionPro:
                 wp = port_w[sector_assets].sum()
                 wb = bench_w[sector_assets].sum()
 
-                # Sector portfolio and benchmark returns
                 rp = 0.0
                 rb = 0.0
                 if wp > 0:
@@ -773,11 +801,7 @@ class EnhancedPerformanceAttributionPro:
 # 5. ADVANCED BACKTESTING
 # ============================================================================
 
-def map_rebalancing_frequency(freq_label: str) -> Optional[str]:
-    """
-    Map UI rebalancing frequency label to pandas offset alias.
-    Supports English labels; can be extended for others.
-    """
+def map_rebalancing_frequency(freq_label: str) -> str:
     mapping = {
         "Daily": "D",
         "Weekly": "W",
@@ -791,7 +815,7 @@ class PortfolioBacktesterPro:
     def __init__(self, returns: pd.DataFrame):
         self.returns = returns
 
-    def run_backtest(self, config: Dict) -> Dict:
+    def run_backtest(self, config: Dict) -> Dict[str, Any]:
         strategy = config.get('type', 'BUY_HOLD')
         if strategy == 'BUY_HOLD':
             return self._run_buy_hold(config)
@@ -800,7 +824,7 @@ class PortfolioBacktesterPro:
         else:
             return self._run_buy_hold(config)
 
-    def _run_buy_hold(self, config: Dict) -> Dict:
+    def _run_buy_hold(self, config: Dict) -> Dict[str, Any]:
         if self.returns.empty:
             return {
                 'portfolio_value': pd.Series(dtype=float),
@@ -816,7 +840,7 @@ class PortfolioBacktesterPro:
             'strategy': 'BUY_HOLD'
         }
 
-    def _run_rebalance_fixed(self, config: Dict) -> Dict:
+    def _run_rebalance_fixed(self, config: Dict) -> Dict[str, Any]:
         if self.returns.empty:
             return {
                 'portfolio_value': pd.Series(dtype=float),
@@ -835,25 +859,21 @@ class PortfolioBacktesterPro:
                 'strategy': 'REBALANCE_FIXED'
             }
 
-        # Determine rebalancing dates
         try:
             rebalance_dates = set(self.returns.resample(freq).first().index)
         except Exception:
             rebalance_dates = set()
 
-        # Always rebalance at the first date
         rebalance_dates.add(dates[0])
 
-        portfolio_values = []
-        portfolio_returns = []
+        portfolio_values: List[float] = []
+        portfolio_returns: List[float] = []
 
-        # Start with target weights
         current_weights = target_weights.copy()
         portfolio_value = 1.0
 
         for dt in dates:
             if dt in rebalance_dates:
-                # Rebalance to target weights
                 current_weights = target_weights.copy()
 
             r_t = self.returns.loc[dt]
@@ -863,7 +883,6 @@ class PortfolioBacktesterPro:
             portfolio_values.append(portfolio_value)
             portfolio_returns.append(daily_port_ret)
 
-            # Update weights after market move
             asset_values = current_weights.values * (1.0 + r_t.values)
             total_value = asset_values.sum()
             if total_value > 0:
@@ -878,9 +897,6 @@ class PortfolioBacktesterPro:
             'strategy': 'REBALANCE_FIXED'
         }
 
-# ============================================================================
-# 6. SCENARIO STRESS TESTING (NEW)
-# ============================================================================
 # ============================================================================
 # 6. SCENARIO STRESS TESTING (UPDATED & ROBUST)
 # ============================================================================
@@ -909,7 +925,6 @@ class ScenarioStressTester:
                 start = datetime.strptime(start_str, '%Y-%m-%d')
                 end = datetime.strptime(end_str, '%Y-%m-%d')
 
-                # Fetch prices for that crisis window
                 prices, bench_prices = self.dm.fetch_portfolio_data(
                     tickers, benchmark_ticker, start, end
                 )
@@ -917,13 +932,11 @@ class ScenarioStressTester:
                     results[scenario_name] = {'error': 'No price data in this period'}
                     continue
 
-                # Compute returns
                 returns, bench_returns = self.dm.calculate_returns(prices, bench_prices)
                 if returns.empty or bench_returns.empty:
                     results[scenario_name] = {'error': 'No return data in this period'}
                     continue
                 
-                # Dynamic renormalization on available assets
                 available_assets = [t for t in tickers if t in returns.columns]
                 if not available_assets:
                     results[scenario_name] = {'error': 'No overlapping assets in this period'}
@@ -933,18 +946,11 @@ class ScenarioStressTester:
                 if original_coverage <= 0.0:
                     results[scenario_name] = {'error': 'Zero effective weights for available assets'}
                     continue
-
-                if original_coverage < 0.4:
-                    results[scenario_name] = {
-                        'error': f"Insufficient coverage ({original_coverage:.0%})"
-                    }
-                    continue
                 
                 normalized_weights = (
                     np.array([weights[t] for t in available_assets]) / original_coverage
                 )
 
-                # Scenario returns
                 scenario_returns = returns[available_assets].dot(normalized_weights)
                 if scenario_returns.empty:
                     results[scenario_name] = {'error': 'No scenario returns for this period'}
@@ -955,7 +961,6 @@ class ScenarioStressTester:
                     results[scenario_name] = {'error': 'Empty cumulative portfolio series'}
                     continue
 
-                # Benchmark cumulative
                 if bench_returns.empty:
                     cumulative_benchmark = pd.Series(dtype=float)
                     bench_total_return = 0.0
@@ -963,7 +968,6 @@ class ScenarioStressTester:
                     cumulative_benchmark = (1 + bench_returns).cumprod()
                     bench_total_return = (1 + bench_returns).prod() - 1
 
-                # Max drawdown
                 running_max = cumulative_portfolio.cummax()
                 dd = (cumulative_portfolio - running_max) / running_max
                 max_dd = dd.min() if not dd.empty else 0.0
@@ -1001,11 +1005,10 @@ class ScenarioStressTester:
             })
         return pd.DataFrame(data)
 
-
-
 # ============================================================================
 # 7. VISUALIZATION ENGINE
 # ============================================================================
+
 class VisualizationEnginePro:
     def __init__(self):
         self.colors = {'primary': '#00cc96', 'danger': '#ef553b', 'success': '#00cc96'}
@@ -1015,13 +1018,12 @@ class VisualizationEnginePro:
         fig = make_subplots(
             rows=2,
             cols=2,
-            subplot_titles=("Portfolio Value", "Drawdown", "Daily Returns", "Placeholder")
+            subplot_titles=("Portfolio Value", "Drawdown", "Daily Returns", " ")
         )
         port_val = data.get('portfolio_value', pd.Series())
         port_ret = data.get('portfolio_returns', pd.Series())
 
         if not port_val.empty:
-            # Portfolio value
             fig.add_trace(
                 go.Scatter(
                     x=port_val.index,
@@ -1032,7 +1034,6 @@ class VisualizationEnginePro:
                 row=1,
                 col=1
             )
-            # Drawdown
             running_max = port_val.cummax()
             drawdown = (port_val - running_max) / running_max
             fig.add_trace(
@@ -1047,7 +1048,6 @@ class VisualizationEnginePro:
             )
 
         if not port_ret.empty:
-            # Daily returns histogram
             fig.add_trace(
                 go.Histogram(
                     x=port_ret,
@@ -1058,7 +1058,7 @@ class VisualizationEnginePro:
             )
 
         fig.update_layout(
-            height=800,
+            height=700,
             template=self.template,
             title="Portfolio Performance Dashboard"
         )
@@ -1088,12 +1088,7 @@ class VisualizationEnginePro:
             go.Waterfall(
                 measure=["relative", "relative", "relative", "total"],
                 x=["Allocation", "Selection", "Interaction", "Total Excess"],
-                y=[
-                    allocation,
-                    selection,
-                    interaction,
-                    total_excess
-                ],
+                y=[allocation, selection, interaction, total_excess],
                 text=[
                     f"{allocation:.2%}",
                     f"{selection:.2%}",
@@ -1123,15 +1118,16 @@ class VisualizationEnginePro:
                 line=dict(color=self.colors['primary'], width=3)
             )
         )
-        fig.add_trace(
-            go.Scatter(
-                x=bench.index,
-                y=bench,
-                mode='lines',
-                name='Benchmark',
-                line=dict(color='#888', width=2, dash='dot')
+        if not bench.empty:
+            fig.add_trace(
+                go.Scatter(
+                    x=bench.index,
+                    y=bench,
+                    mode='lines',
+                    name='Benchmark',
+                    line=dict(color='#888', width=2, dash='dot')
+                )
             )
-        )
         fig.update_layout(
             title=f"Stress Test: {scenario_name}",
             template=self.template,
@@ -1140,7 +1136,135 @@ class VisualizationEnginePro:
         )
         return fig
 
+    def create_var_distribution_chart(self, returns: pd.Series, var_metrics: Dict[str, Any]) -> go.Figure:
+        pr = returns.dropna()
+        if pr.empty:
+            return go.Figure()
+        fig = px.histogram(pr, nbins=50, title="Return Distribution with VaR Levels")
+        var95 = var_metrics.get('VaR 95% (Hist)')
+        var99 = var_metrics.get('VaR 99% (Hist)')
+        if var95 is not None:
+            fig.add_vline(
+                x=var95,
+                line_dash="dash",
+                line_width=2,
+                annotation_text="VaR 95% (Hist)",
+                annotation_position="top left"
+            )
+        if var99 is not None:
+            fig.add_vline(
+                x=var99,
+                line_dash="dot",
+                line_width=2,
+                annotation_text="VaR 99% (Hist)",
+                annotation_position="top right"
+            )
+        fig.update_layout(template=self.template)
+        return fig
 
+    def create_var_comparison_chart(self, port_metrics: Dict[str, Any], bench_metrics: Dict[str, Any]) -> go.Figure:
+        keys = ['VaR 95% (Hist)', 'CVaR 95% (Hist)', 'VaR 99% (Hist)', 'CVaR 99% (Hist)']
+        labels: List[str] = []
+        port_vals: List[Optional[float]] = []
+        bench_vals: List[Optional[float]] = []
+        for k in keys:
+            pv = port_metrics.get(k, None)
+            bv = bench_metrics.get(k, None)
+            if pv is None and bv is None:
+                continue
+            labels.append(k)
+            port_vals.append(pv)
+            bench_vals.append(bv)
+        if not labels:
+            return go.Figure()
+        fig = go.Figure()
+        fig.add_trace(go.Bar(name="Portfolio", x=labels, y=port_vals))
+        fig.add_trace(go.Bar(name="Benchmark", x=labels, y=bench_vals))
+        fig.update_layout(
+            barmode="group",
+            template=self.template,
+            title="Portfolio vs Benchmark VaR / CVaR (Historical)"
+        )
+        return fig
+
+    def create_rolling_var_chart(
+        self,
+        returns: pd.Series,
+        rolling_var: Optional[pd.Series],
+        alpha_label: str
+    ) -> go.Figure:
+        if rolling_var is None or isinstance(rolling_var, (float, int)):
+            return go.Figure()
+        rv = rolling_var.dropna()
+        pr = returns.dropna()
+        if rv.empty or pr.empty:
+            return go.Figure()
+        common_idx = pr.index.intersection(rv.index)
+        if len(common_idx) == 0:
+            return go.Figure()
+        pr = pr.loc[common_idx]
+        rv = rv.loc[common_idx]
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=pr.index, y=pr, mode="lines", name="Returns"))
+        fig.add_trace(go.Scatter(x=rv.index, y=rv, mode="lines", name=f"Rolling VaR {alpha_label}"))
+        fig.update_layout(
+            template=self.template,
+            title=f"Rolling Historical VaR {alpha_label}",
+            yaxis_title="Return"
+        )
+        return fig
+
+    def create_capm_sml_chart(
+        self,
+        asset_betas: pd.Series,
+        asset_ann_returns: pd.Series,
+        portfolio_beta: float,
+        portfolio_ann_return: float,
+        risk_free_rate: float,
+        benchmark_ann_return: float
+    ) -> go.Figure:
+        if asset_betas is None or asset_ann_returns is None or asset_betas.empty:
+            return go.Figure()
+        y_assets = asset_ann_returns.reindex(asset_betas.index)
+        fig = go.Figure()
+        fig.add_trace(
+            go.Scatter(
+                x=asset_betas.values,
+                y=y_assets.values,
+                mode="markers",
+                name="Assets",
+                text=list(asset_betas.index)
+            )
+        )
+        if np.isnan(benchmark_ann_return):
+            benchmark_ann_return = portfolio_ann_return
+        market_excess = benchmark_ann_return - risk_free_rate
+        x_line = [0.0, 1.5]
+        y_line = [risk_free_rate + b * market_excess for b in x_line]
+        fig.add_trace(
+            go.Scatter(
+                x=x_line,
+                y=y_line,
+                mode="lines",
+                name="Security Market Line"
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=[portfolio_beta],
+                y=[portfolio_ann_return],
+                mode="markers",
+                name="Portfolio",
+                marker=dict(size=12, symbol="star")
+            )
+        )
+        fig.update_layout(
+            template=self.template,
+            title="CAPM: Security Market Line & Portfolio",
+            xaxis_title="Beta",
+            yaxis_title="Annual Return"
+        )
+        return fig
 
 # ============================================================================
 # 8. MAIN APPLICATION
@@ -1149,10 +1273,11 @@ class VisualizationEnginePro:
 def main():
     st.markdown(
         '<div class="main-header"><h1>🏛️ QUANTEDGE PRO</h1>'
-        '<p>Institutional Portfolio Analysis Platform v3.2</p></div>',
+        '<p>Institutional Portfolio Analysis Platform v3.3</p></div>',
         unsafe_allow_html=True
     )
 
+    # --- SIDEBAR CONFIGURATION ---
     with st.sidebar:
         st.header("🔧 Configuration")
         universe_name = st.selectbox("Asset Universe", list(Constants.ASSET_UNIVERSES.keys()))
@@ -1174,14 +1299,13 @@ def main():
         
         method = st.selectbox(
             "Optimization Method",
-            ["MAX_SHARPE", "MIN_VOLATILITY", "RISK_PARITY", "MEAN_VARIANCE", "HRP"]
+            ["MAX_SHARPE", "MIN_VOLATILITY", "RISK_PARITY", "MEAN_VARIANCE", "HRP", "EQUAL_WEIGHT"]
         )
         
         constraints: Dict[str, Any] = {}
         if method == "MEAN_VARIANCE":
             st.markdown("---")
             if st.checkbox("Enable Sector Limits"):
-                # Example: Technology sector max 40%
                 constraints['sector_limits'] = {'Technology': (0.0, 0.40)}
 
         st.markdown("---")
@@ -1209,6 +1333,7 @@ def main():
 
         run_btn = st.button("🚀 RUN ANALYSIS", type="primary", use_container_width=True)
 
+    # --- MAIN PIPELINE ---
     if run_btn:
         if not tickers:
             st.error("Please select at least one asset.")
@@ -1240,6 +1365,10 @@ def main():
                 st.stop()
             returns, bench_returns = dm.calculate_returns(prices, bench_prices, method='log')
 
+        if returns.empty or bench_returns.empty:
+            st.error("No overlapping return data between portfolio and benchmark.")
+            st.stop()
+
         # 2. Classification
         classifier = EnhancedAssetClassifierPro()
         meta = classifier.classify_tickers(tickers)
@@ -1252,7 +1381,7 @@ def main():
             st.error("Optimization failed. Please adjust settings or universe.")
             st.stop()
 
-        # 4. Backtesting (using selected strategy and rebalancing frequency)
+        # 4. Backtesting
         backtester = PortfolioBacktesterPro(returns)
         backtest_config = {
             'type': bt_strategy,
@@ -1263,14 +1392,16 @@ def main():
         portfolio_value = backtest_result['portfolio_value']
         portfolio_returns = backtest_result['portfolio_returns']
 
-        # 5. Risk Analysis
+        # 5. Risk Analysis (core + advanced VaR/ES)
         risk_engine = AdvancedRiskAnalyzerPro()
         risk_metrics = risk_engine.calculate_comprehensive_metrics(
             portfolio_returns,
             bench_returns,
             config.risk_free_rate
         )
-        
+        adv_var_port = risk_engine.compute_advanced_var_metrics(portfolio_returns)
+        adv_var_bench = risk_engine.compute_advanced_var_metrics(bench_returns)
+
         # 6. Attribution
         attr_engine = EnhancedPerformanceAttributionPro()
         benchmark_equal_weights = {t: 1.0 / len(tickers) for t in tickers}
@@ -1282,134 +1413,266 @@ def main():
             sector_map
         )
         
-        # 7. Visualization Setup
-        viz = VisualizationEnginePro()
-        
-        # --- DASHBOARD UI ---
-        
-        st.markdown('<div class="section-header">📊 Overview</div>', unsafe_allow_html=True)
-        c1, c2, c3, c4 = st.columns(4)
-        
-        c1.markdown(
-            f"""<div class="pro-card"><div class="metric-label">Annual Return</div>
-            <div class="metric-value">{risk_metrics.get('Annual Return', 0.0):.2%}</div>
-            <div class="metric-change">vs Benchmark: {risk_metrics.get('Annual Return', 0.0) - risk_metrics.get('Benchmark Annual Return', 0.0):+.2%}</div></div>""",
-            unsafe_allow_html=True
+        # 7. CAPM (asset betas + portfolio beta)
+        market_var = bench_returns.var()
+        raw_betas = {
+            t: (returns[t].cov(bench_returns) / market_var) if market_var > 0 else np.nan
+            for t in returns.columns
+        }
+        asset_betas = pd.Series(raw_betas).dropna()
+        asset_ann_returns = (returns.mean() * TRADING_DAYS_PER_YEAR).reindex(asset_betas.index)
+        portfolio_ann_return = risk_metrics.get('Annual Return', 0.0)
+        bench_ann_return = risk_metrics.get('Benchmark Annual Return', 0.0)
+        portfolio_beta = float(
+            sum(
+                weights.get(t, 0.0) * raw_betas.get(t, 0.0)
+                for t in returns.columns
+                if not np.isnan(raw_betas.get(t, np.nan))
+            )
         )
-            
-        c2.markdown(
-            f"""<div class="pro-card"><div class="metric-label">Volatility</div>
-            <div class="metric-value">{risk_metrics.get('Annual Volatility', 0.0):.2%}</div>
-            <div class="metric-change">{risk_metrics.get('Risk Category', 'N/A')}</div></div>""",
-            unsafe_allow_html=True
-        )
-            
-        c3.markdown(
-            f"""<div class="pro-card"><div class="metric-label">Sharpe Ratio</div>
-            <div class="metric-value">{risk_metrics.get('Sharpe Ratio', 0.0):.2f}</div></div>""",
-            unsafe_allow_html=True
-        )
-            
-        c4.markdown(
-            f"""<div class="pro-card"><div class="metric-label">Max Drawdown</div>
-            <div class="metric-value negative">{risk_metrics.get('Max Drawdown', 0.0):.2%}</div>
-            <div class="metric-change">Duration: {risk_metrics.get('Max Drawdown Duration', 0)} days</div></div>""",
-            unsafe_allow_html=True
-        )
+        betas_for_shocks = {
+            t: (raw_betas.get(t, 1.0) if not np.isnan(raw_betas.get(t, np.nan)) else 1.0)
+            for t in returns.columns
+        }
 
-        # Performance chart
-        st.markdown("### Portfolio Performance")
+        # 8. Rolling VaR series for charts
+        rolling_var95 = adv_var_port.get('Rolling VaR 95% (Hist)')
+        rolling_var99 = adv_var_port.get('Rolling VaR 99% (Hist)')
+
+        # 9. Scenario Stress Tests (if enabled)
+        stress_res: Dict[str, Dict] = {}
+        if run_scenarios and selected_scenarios:
+            stress_tester = ScenarioStressTester(dm)
+            with st.spinner("Simulating scenarios..."):
+                stress_res = stress_tester.run_stress_test(selected_scenarios, weights, benchmark)
+        else:
+            stress_tester = ScenarioStressTester(dm)
+
+        # 10. Hypothetical Shocks
+        shock_engine = ScenarioStressTester(dm)
+        shock_df = shock_engine.simulate_hypothetical_shocks(100000, weights, betas_for_shocks)
+
+        # 11. Visualization setup
+        viz = VisualizationEnginePro()
         perf_fig = viz.create_performance_dashboard(
             {'portfolio_value': portfolio_value, 'portfolio_returns': portfolio_returns}
         )
-        st.plotly_chart(perf_fig, use_container_width=True)
-
-        # Portfolio composition
-        st.markdown("### Portfolio Composition")
         weights_df = (
             pd.DataFrame.from_dict(weights, orient='index', columns=['Weight'])
             .sort_values('Weight', ascending=False)
         )
-        st.bar_chart(weights_df)
-
-        col_g1, col_g2 = st.columns(2)
-        with col_g1:
-            st.markdown("### Risk Decomposition")
-            component_var = risk_engine.calculate_component_var(returns, weights)
-            st.plotly_chart(
-                viz.create_risk_decomposition_chart(component_var, sector_map),
-                use_container_width=True
-            )
-        with col_g2:
-            st.markdown("### Attribution Analysis")
-            st.plotly_chart(
-                viz.create_attribution_waterfall(attr_res),
-                use_container_width=True
-            )
-
-        # 8. SCENARIO STRESS TESTING
-        if run_scenarios and selected_scenarios:
-            st.markdown('<div class="section-header">🌪️ Historical Stress Testing</div>', unsafe_allow_html=True)
-            stress_tester = ScenarioStressTester(dm)
-            with st.spinner("Simulating scenarios..."):
-                stress_res = stress_tester.run_stress_test(selected_scenarios, weights, benchmark)
-            
-            tabs = st.tabs(list(stress_res.keys()))
-            for i, (scen, data) in enumerate(stress_res.items()):
-                with tabs[i]:
-                    if 'error' in data:
-                        st.warning(data['error'])
-                    else:
-                        sc1, sc2 = st.columns([1, 2])
-                        with sc1:
-                            ret_color = "green" if data['portfolio_return'] > 0 else "red"
-                            delta = data['portfolio_return'] - data['benchmark_return']
-                            st.markdown(
-                                f"""
-                            <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 10px;">
-                                <div style="color: #888; font-size: 0.9em;">Total Return</div>
-                                <div style="font-size: 1.8em; font-weight: bold; color: {ret_color};">{data['portfolio_return']:.2%}</div>
-                                <div style="font-size: 0.9em; color: {'#00cc96' if delta > 0 else '#ef553b'};">vs Benchmark: {delta:+.2%}</div>
-                                <hr style="border-color: #444;">
-                                <div style="color: #888; font-size: 0.9em;">Max Drawdown</div>
-                                <div style="font-size: 1.4em; font-weight: bold; color: #ef553b;">{data['max_drawdown']:.2%}</div>
-                                <div style="margin-top: 10px; font-size: 0.8em; color: #666;">*Simulated using {data['surviving_assets']} available assets ({data['coverage']:.0%} coverage).</div>
-                            </div>
-                            """,
-                                unsafe_allow_html=True
-                            )
-                        with sc2:
-                            st.plotly_chart(
-                                viz.create_stress_test_chart(scen, data),
-                                use_container_width=True
-                            )
-
-        # 9. HYPOTHETICAL SHOCKS
-        st.markdown('<div class="section-header">⚡ Hypothetical Shocks (Beta Sensitivity)</div>', unsafe_allow_html=True)
-        # Quick beta calculation
-        market_var = bench_returns.var()
-        betas = {
-            t: (returns[t].cov(bench_returns) / market_var) if market_var > 0 else 1.0
-            for t in returns.columns
-        }
-        
-        stress_tester = ScenarioStressTester(dm)
-        shock_df = stress_tester.simulate_hypothetical_shocks(100000, weights, betas)
-        
-        def color_pnl(val):
-            return f'color: {"#00cc96" if val > 0 else "#ef553b"}'
-        
-        st.dataframe(
-            shock_df.style.format(
-                {
-                    'Market Move': '{:+.0%}',
-                    'Portfolio Impact': '{:+.2%}',
-                    'P&L ($)': '${:+,.0f}',
-                    'Portfolio Beta': '{:.2f}'
-                }
-            ).applymap(color_pnl, subset=['P&L ($)', 'Portfolio Impact']),
-            use_container_width=True
+        component_var = risk_engine.calculate_component_var(returns, weights)
+        capm_fig = viz.create_capm_sml_chart(
+            asset_betas, asset_ann_returns, portfolio_beta,
+            portfolio_ann_return, config.risk_free_rate, bench_ann_return
         )
+
+        # 12. Config highlight
+        period_days = len(portfolio_returns)
+        st.markdown(
+            f"""
+        <div class="highlight-box">
+            <strong>Configuration Summary</strong><br>
+            Universe: <b>{config.universe}</b> | Benchmark: <b>{config.benchmark}</b> | Currency: <b>{Constants.ASSET_UNIVERSES[config.universe]['currency']}</b><br>
+            Period: <b>{start_date} → {end_date}</b> | Assets: <b>{len(tickers)}</b> | Optimization: <b>{method}</b><br>
+            Strategy: <b>{bt_strategy}</b> | Rebalancing: <b>{bt_freq_ui}</b> | Observations: <b>{period_days}</b>
+        </div>
+        """,
+            unsafe_allow_html=True
+        )
+
+        # 13. TABS: Overview / Risk & VaR / Optimization & CAPM / Stress / Shocks
+        tab_overview, tab_risk, tab_opt, tab_stress, tab_shocks = st.tabs(
+            ["Overview", "Risk & VaR / ES", "Optimization & CAPM", "Stress Testing", "Shocks & Scenarios"]
+        )
+
+        # --- OVERVIEW TAB ---
+        with tab_overview:
+            st.markdown('<div class="section-header">📊 Overview</div>', unsafe_allow_html=True)
+            c1, c2, c3, c4 = st.columns(4)
+            
+            c1.markdown(
+                f"""<div class="pro-card"><div class="metric-label">Annual Return</div>
+                <div class="metric-value">{risk_metrics.get('Annual Return', 0.0):.2%}</div>
+                <div class="metric-change">vs Benchmark: {risk_metrics.get('Annual Return', 0.0) - risk_metrics.get('Benchmark Annual Return', 0.0):+.2%}</div></div>""",
+                unsafe_allow_html=True
+            )
+                
+            c2.markdown(
+                f"""<div class="pro-card"><div class="metric-label">Volatility</div>
+                <div class="metric-value">{risk_metrics.get('Annual Volatility', 0.0):.2%}</div>
+                <div class="metric-change">{risk_metrics.get('Risk Category', 'N/A')}</div></div>""",
+                unsafe_allow_html=True
+            )
+                
+            c3.markdown(
+                f"""<div class="pro-card"><div class="metric-label">Sharpe Ratio</div>
+                <div class="metric-value">{risk_metrics.get('Sharpe Ratio', 0.0):.2f}</div></div>""",
+                unsafe_allow_html=True
+            )
+                
+            c4.markdown(
+                f"""<div class="pro-card"><div class="metric-label">Max Drawdown</div>
+                <div class="metric-value negative">{risk_metrics.get('Max Drawdown', 0.0):.2%}</div>
+                <div class="metric-change">Duration: {risk_metrics.get('Max Drawdown Duration', 0)} days</div></div>""",
+                unsafe_allow_html=True
+            )
+
+            st.markdown("### Portfolio Performance")
+            st.plotly_chart(perf_fig, use_container_width=True)
+
+            st.markdown("### Portfolio Composition")
+            st.bar_chart(weights_df)
+
+            col_g1, col_g2 = st.columns(2)
+            with col_g1:
+                st.markdown("### Risk Decomposition")
+                st.plotly_chart(
+                    viz.create_risk_decomposition_chart(component_var, sector_map),
+                    use_container_width=True
+                )
+            with col_g2:
+                st.markdown("### Attribution Analysis")
+                st.plotly_chart(
+                    viz.create_attribution_waterfall(attr_res),
+                    use_container_width=True
+                )
+
+        # --- RISK & VaR / ES TAB ---
+        with tab_risk:
+            st.markdown('<div class="section-header">📉 Risk & Advanced VaR / ES</div>', unsafe_allow_html=True)
+
+            base_metrics_display = {
+                k: v for k, v in risk_metrics.items()
+                if not isinstance(v, (pd.Series, pd.DataFrame))
+            }
+            st.subheader("Core Risk Metrics")
+            st.dataframe(
+                pd.DataFrame(base_metrics_display, index=["Portfolio"]).T,
+                use_container_width=True
+            )
+
+            adv_scalar_port = {
+                k: v for k, v in adv_var_port.items()
+                if not isinstance(v, (pd.Series, pd.DataFrame))
+            }
+            adv_scalar_bench = {
+                k: v for k, v in adv_var_bench.items()
+                if not isinstance(v, (pd.Series, pd.DataFrame))
+            }
+
+            if adv_scalar_port:
+                st.subheader("Advanced VaR / CVaR / ES (Portfolio)")
+                st.dataframe(
+                    pd.DataFrame(adv_scalar_port, index=["Portfolio"]).T,
+                    use_container_width=True
+                )
+            if adv_scalar_bench:
+                st.subheader("Advanced VaR / CVaR (Benchmark)")
+                st.dataframe(
+                    pd.DataFrame(adv_scalar_bench, index=["Benchmark"]).T,
+                    use_container_width=True
+                )
+
+            col_r1, col_r2 = st.columns(2)
+            with col_r1:
+                st.markdown("#### Return Distribution & VaR Levels")
+                st.plotly_chart(
+                    viz.create_var_distribution_chart(portfolio_returns, adv_var_port),
+                    use_container_width=True
+                )
+            with col_r2:
+                st.markdown("#### Portfolio vs Benchmark VaR / CVaR (Historical)")
+                st.plotly_chart(
+                    viz.create_var_comparison_chart(adv_var_port, adv_var_bench),
+                    use_container_width=True
+                )
+
+            st.markdown("#### Rolling Historical VaR 95%")
+            st.plotly_chart(
+                viz.create_rolling_var_chart(portfolio_returns, rolling_var95, "95%"),
+                use_container_width=True
+            )
+
+        # --- OPTIMIZATION & CAPM TAB ---
+        with tab_opt:
+            st.markdown('<div class="section-header">🚀 Optimization & CAPM</div>', unsafe_allow_html=True)
+            st.subheader("Optimization Summary")
+            st.write(
+                f"Method: **{method}**, Strategy: **{bt_strategy}**, "
+                f"Rebalancing: **{bt_freq_ui}**"
+            )
+            st.write(
+                f"Optimized portfolio annual return: "
+                f"{risk_metrics.get('Annual Return', 0.0):.2%}, "
+                f"volatility: {risk_metrics.get('Annual Volatility', 0.0):.2%}, "
+                f"Sharpe: {risk_metrics.get('Sharpe Ratio', 0.0):.2f}"
+            )
+
+            st.subheader("Weights")
+            st.dataframe(
+                weights_df.style.format({'Weight': '{:.2%}'}),
+                use_container_width=True
+            )
+
+            st.markdown("### CAPM Security Market Line")
+            st.plotly_chart(capm_fig, use_container_width=True)
+
+        # --- STRESS TESTING TAB ---
+        with tab_stress:
+            st.markdown('<div class="section-header">🌪️ Historical Stress Testing</div>', unsafe_allow_html=True)
+            if run_scenarios and selected_scenarios and stress_res:
+                inner_tabs = st.tabs(list(stress_res.keys()))
+                for i, (scen, data) in enumerate(stress_res.items()):
+                    with inner_tabs[i]:
+                        if 'error' in data:
+                            st.warning(data['error'])
+                        else:
+                            sc1, sc2 = st.columns([1, 2])
+                            with sc1:
+                                ret_color = "green" if data['portfolio_return'] > 0 else "red"
+                                delta = data['portfolio_return'] - data['benchmark_return']
+                                st.markdown(
+                                    f"""
+                                <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 10px;">
+                                    <div style="color: #888; font-size: 0.9em;">Total Return</div>
+                                    <div style="font-size: 1.8em; font-weight: bold; color: {ret_color};">{data['portfolio_return']:.2%}</div>
+                                    <div style="font-size: 0.9em; color: {'#00cc96' if delta > 0 else '#ef553b'};">vs Benchmark: {delta:+.2%}</div>
+                                    <hr style="border-color: #444;">
+                                    <div style="color: #888; font-size: 0.9em;">Max Drawdown</div>
+                                    <div style="font-size: 1.4em; font-weight: bold; color: #ef553b;">{data['max_drawdown']:.2%}</div>
+                                    <div style="margin-top: 10px; font-size: 0.8em; color: #666;">
+                                        *Simulated using {data['surviving_assets']} available assets ({data['coverage']:.0%} coverage).
+                                    </div>
+                                </div>
+                                """,
+                                    unsafe_allow_html=True
+                                )
+                            with sc2:
+                                st.plotly_chart(
+                                    viz.create_stress_test_chart(scen, data),
+                                    use_container_width=True
+                                )
+            else:
+                st.info("Enable 'Run Historical Stress Tests' and select scenarios from the sidebar to see scenario results.")
+
+        # --- SHOCKS & SCENARIOS TAB ---
+        with tab_shocks:
+            st.markdown('<div class="section-header">⚡ Hypothetical Shocks (Beta Sensitivity)</div>', unsafe_allow_html=True)
+            def color_pnl(val):
+                return f'color: {"#00cc96" if val > 0 else "#ef553b"}'
+            
+            st.dataframe(
+                shock_df.style.format(
+                    {
+                        'Market Move': '{:+.0%}',
+                        'Portfolio Impact': '{:+.2%}',
+                        'P&L ($)': '${:+,.0f}',
+                        'Portfolio Beta': '{:.2f}'
+                    }
+                ).applymap(color_pnl, subset=['P&L ($)', 'Portfolio Impact']),
+                use_container_width=True
+            )
 
 if __name__ == "__main__":
     main()
