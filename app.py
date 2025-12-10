@@ -674,7 +674,7 @@ class AdvancedVisualizationEngine:
         # Prepare data for animation
         dates = portfolio_values.index
         portfolio_vals = portfolio_values.values
-        benchmark_vals = benchmark_values.reindex(dates).values
+        benchmark_vals = benchmark_values.reindex(dates).fillna(method='ffill').fillna(method='bfill').values
         
         # Create frames for animation
         frames = []
@@ -793,8 +793,17 @@ class AdvancedVisualizationEngine:
         """Create interactive correlation heatmap with clustering."""
         performance_monitor.start_operation('interactive_heatmap')
         
-        # Reorder correlation matrix based on clustering
         try:
+            # Ensure correlation matrix is valid
+            correlation_matrix = correlation_matrix.copy()
+            
+            # Check for NaN values and replace with 0
+            if correlation_matrix.isnull().any().any():
+                correlation_matrix = correlation_matrix.fillna(0)
+            
+            # Ensure diagonal is 1
+            np.fill_diagonal(correlation_matrix.values, 1.0)
+            
             # Convert correlation to distance
             distance_matrix = np.sqrt(2 * (1 - correlation_matrix.values))
             
@@ -963,112 +972,124 @@ class AdvancedVisualizationEngine:
         
         # 4. Rolling VaR (Line)
         for window in window_sizes:
-            rolling_var = returns.rolling(window=window).apply(
-                lambda x: -np.percentile(x, 5), raw=True
-            )
-            fig.add_trace(
-                go.Scatter(
-                    x=rolling_var.index,
-                    y=rolling_var.values,
-                    mode='lines',
-                    name=f'Rolling VaR ({window}d)',
-                    line=dict(width=2),
-                    showlegend=True
-                ),
-                row=2, col=1
-            )
+            try:
+                rolling_var = returns.rolling(window=window).apply(
+                    lambda x: -np.percentile(x, 5) if len(x.dropna()) >= 20 else np.nan, 
+                    raw=True
+                ).dropna()
+                if not rolling_var.empty:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=rolling_var.index,
+                            y=rolling_var.values,
+                            mode='lines',
+                            name=f'Rolling VaR ({window}d)',
+                            line=dict(width=2),
+                            showlegend=True
+                        ),
+                        row=2, col=1
+                    )
+            except Exception as e:
+                continue
         
         # 5. VaR Method Comparison (Grouped Bar)
         conf_95_values = []
         conf_99_values = []
         
         for method in methods:
-            conf_95_values.append(var_results[method][0.95]['VaR'])
-            conf_99_values.append(var_results[method][0.99]['VaR'])
+            if 0.95 in var_results[method]:
+                conf_95_values.append(var_results[method][0.95]['VaR'])
+            if 0.99 in var_results[method]:
+                conf_99_values.append(var_results[method][0.99]['VaR'])
         
-        fig.add_trace(
-            go.Bar(
-                x=methods,
-                y=conf_95_values,
-                name='VaR 95%',
-                marker_color='#ef553b'
-            ),
-            row=2, col=2
-        )
-        
-        fig.add_trace(
-            go.Bar(
-                x=methods,
-                y=conf_99_values,
-                name='VaR 99%',
-                marker_color='#ff6b6b',
-                opacity=0.7
-            ),
-            row=2, col=2
-        )
-        
-        # 6. VaR Violations (Scatter)
-        var_95 = -np.percentile(returns, 5)
-        violations = returns < -var_95
-        
-        fig.add_trace(
-            go.Scatter(
-                x=returns.index,
-                y=returns.values,
-                mode='markers',
-                name='Returns',
-                marker=dict(
-                    size=6,
-                    color=['#ef553b' if v else '#636efa' for v in violations],
+        if conf_95_values and conf_99_values:
+            fig.add_trace(
+                go.Bar(
+                    x=methods,
+                    y=conf_95_values,
+                    name='VaR 95%',
+                    marker_color='#ef553b'
+                ),
+                row=2, col=2
+            )
+            
+            fig.add_trace(
+                go.Bar(
+                    x=methods,
+                    y=conf_99_values,
+                    name='VaR 99%',
+                    marker_color='#ff6b6b',
                     opacity=0.7
                 ),
-                showlegend=False
-            ),
-            row=2, col=3
-        )
+                row=2, col=2
+            )
         
-        fig.add_hline(
-            y=-var_95,
-            line_dash="dash",
-            line_color="#FFA15A",
-            annotation_text="VaR 95% Threshold",
-            row=2, col=3
-        )
+        # 6. VaR Violations (Scatter)
+        if len(returns) > 0:
+            var_95 = -np.percentile(returns.dropna(), 5)
+            violations = returns < -var_95
+            
+            fig.add_trace(
+                go.Scatter(
+                    x=returns.index,
+                    y=returns.values,
+                    mode='markers',
+                    name='Returns',
+                    marker=dict(
+                        size=6,
+                        color=['#ef553b' if v else '#636efa' for v in violations],
+                        opacity=0.7
+                    ),
+                    showlegend=False
+                ),
+                row=2, col=3
+            )
+            
+            fig.add_hline(
+                y=-var_95,
+                line_dash="dash",
+                line_color="#FFA15A",
+                annotation_text="VaR 95% Threshold",
+                row=2, col=3
+            )
         
         # 7. VaR Distribution (Box)
         all_var_values = []
         for method in methods:
             for conf in confidence_levels:
-                all_var_values.append(var_results[method][conf]['VaR'])
+                if conf in var_results[method]:
+                    all_var_values.append(var_results[method][conf]['VaR'])
         
-        fig.add_trace(
-            go.Box(
-                y=all_var_values,
-                name='VaR Distribution',
-                marker_color='#00cc96',
-                boxmean=True,
-                showlegend=False
-            ),
-            row=3, col=1
-        )
+        if all_var_values:
+            fig.add_trace(
+                go.Box(
+                    y=all_var_values,
+                    name='VaR Distribution',
+                    marker_color='#00cc96',
+                    boxmean=True,
+                    showlegend=False
+                ),
+                row=3, col=1
+            )
         
         # 8. Stress VaR (Line)
         stress_levels = np.linspace(0.90, 0.999, 50)
-        stress_var_values = [-np.percentile(returns, (1-c)*100) for c in stress_levels]
-        
-        fig.add_trace(
-            go.Scatter(
-                x=stress_levels,
-                y=stress_var_values,
-                mode='lines',
-                name='Stress VaR',
-                line=dict(color='#ab63fa', width=3),
-                fill='tozeroy',
-                fillcolor='rgba(171, 99, 250, 0.2)',
-                showlegend=False
-            ),
-            row=3, col=2
-        )
+        if len(returns) > 0:
+            stress_var_values = [-np.percentile(returns.dropna(), (1-c)*100) for c in stress_levels]
+            
+            fig.add_trace(
+                go.Scatter(
+                    x=stress_levels,
+                    y=stress_var_values,
+                    mode='lines',
+                    name='Stress VaR',
+                    line=dict(color='#ab63fa', width=3),
+                    fill='tozeroy',
+                    fillcolor='rgba(171, 99, 250, 0.2)',
+                    showlegend=False
+                ),
+                row=3, col=2
+            )
         
         # 9. VaR Decomposition (Pie)
         components = ['Market Risk', 'Credit Risk', 'Liquidity Risk', 'Operational Risk']
@@ -1124,55 +1145,93 @@ class AdvancedVisualizationEngine:
         methods = ['Historical', 'Parametric', 'Monte Carlo', 'EWMA', 'Extreme Value']
         results = {}
         
+        # Clean returns
+        returns_clean = returns.dropna()
+        if len(returns_clean) == 0:
+            return {method: {conf: {'VaR': 0, 'CVaR': 0, 'ES': 0} for conf in confidence_levels} 
+                    for method in methods}
+        
         for method in methods:
             results[method] = {}
             for confidence in confidence_levels:
+                alpha = 1 - confidence
+                
                 if method == 'Historical':
-                    var = -np.percentile(returns, (1-confidence)*100)
-                    cvar = -returns[returns <= -var].mean() if len(returns[returns <= -var]) > 0 else var * 1.2
-                    es = cvar
-                    
+                    # Historical simulation
+                    if len(returns_clean) > 0:
+                        var = -np.percentile(returns_clean, alpha * 100)
+                        cvar_data = returns_clean[returns_clean <= -var]
+                        cvar = -cvar_data.mean() if len(cvar_data) > 0 else var * 1.2
+                        es = cvar
+                    else:
+                        var = cvar = es = 0
+                        
                 elif method == 'Parametric':
-                    mean = returns.mean()
-                    std = returns.std()
+                    # Parametric (normal distribution)
+                    mean = returns_clean.mean()
+                    std = returns_clean.std()
                     if std > 0:
                         var = -(mean + std * norm.ppf(confidence))
-                        cvar = -(mean - std * norm.pdf(norm.ppf(1-confidence)) / (1-confidence))
+                        cvar = -(mean - std * norm.pdf(norm.ppf(alpha)) / alpha)
                     else:
                         var = -mean
                         cvar = var
                     es = cvar
                     
                 elif method == 'Monte Carlo':
+                    # Monte Carlo simulation
                     np.random.seed(42)
-                    simulated = np.random.normal(returns.mean(), returns.std(), 10000)
-                    var = -np.percentile(simulated, (1-confidence)*100)
-                    cvar = -simulated[simulated <= -var].mean() if len(simulated[simulated <= -var]) > 0 else var * 1.2
+                    n_simulations = 5000
+                    simulated_returns = np.random.normal(returns_clean.mean(), returns_clean.std(), n_simulations)
+                    var = -np.percentile(simulated_returns, alpha * 100)
+                    cvar_data = simulated_returns[simulated_returns <= -var]
+                    cvar = -cvar_data.mean() if len(cvar_data) > 0 else var * 1.2
                     es = cvar
                     
                 elif method == 'EWMA':
                     # Simplified EWMA
                     lambda_ = 0.94
-                    n = len(returns)
+                    n = len(returns_clean)
                     weights = np.array([lambda_ ** i for i in range(n)][::-1])
                     weights = weights / weights.sum()
-                    ewma_std = np.sqrt(np.sum(weights * (returns - returns.mean()) ** 2))
-                    var = -(returns.mean() + ewma_std * norm.ppf(confidence))
-                    cvar = -(returns.mean() - ewma_std * norm.pdf(norm.ppf(1-confidence)) / (1-confidence))
+                    ewma_std = np.sqrt(np.sum(weights * (returns_clean - returns_clean.mean()) ** 2))
+                    if ewma_std > 0:
+                        var = -(returns_clean.mean() + ewma_std * norm.ppf(confidence))
+                        cvar = -(returns_clean.mean() - ewma_std * norm.pdf(norm.ppf(alpha)) / alpha)
+                    else:
+                        var = -returns_clean.mean()
+                        cvar = var
                     es = cvar
                     
                 else:  # Extreme Value
                     # Simplified EVT
-                    threshold = np.percentile(returns, 10)
-                    excess = returns[returns < threshold] - threshold
-                    if len(excess) > 0:
-                        var_evt = threshold + (excess.mean() / 0.5) * ((0.1/(1-confidence)) ** 0.5 - 1)
-                        var = -var_evt
-                        cvar = var * 1.2  # Approximation
+                    if len(returns_clean) >= 20:
+                        threshold = np.percentile(returns_clean, 10)
+                        excess = returns_clean[returns_clean < threshold] - threshold
+                        if len(excess) > 10:
+                            try:
+                                # Simplified GPD estimation
+                                xi, beta = self._estimate_gpd_parameters(excess)
+                                var_evt = threshold + (beta/xi) * (((len(returns_clean) * alpha) / len(excess)) ** (-xi) - 1)
+                                var = -var_evt
+                                es_evt = (var_evt + beta - xi * threshold) / (1 - xi)
+                                cvar = -es_evt
+                                es = cvar
+                            except:
+                                var = -np.percentile(returns_clean, alpha * 100)
+                                cvar_data = returns_clean[returns_clean <= -var]
+                                cvar = -cvar_data.mean() if len(cvar_data) > 0 else var * 1.2
+                                es = cvar
+                        else:
+                            var = -np.percentile(returns_clean, alpha * 100)
+                            cvar_data = returns_clean[returns_clean <= -var]
+                            cvar = -cvar_data.mean() if len(cvar_data) > 0 else var * 1.2
+                            es = cvar
                     else:
-                        var = -np.percentile(returns, (1-confidence)*100)
-                        cvar = -returns[returns <= -var].mean() if len(returns[returns <= -var]) > 0 else var * 1.2
-                    es = cvar
+                        var = -np.percentile(returns_clean, alpha * 100)
+                        cvar_data = returns_clean[returns_clean <= -var]
+                        cvar = -cvar_data.mean() if len(cvar_data) > 0 else var * 1.2
+                        es = cvar
                 
                 results[method][confidence] = {
                     'VaR': var,
@@ -1181,6 +1240,19 @@ class AdvancedVisualizationEngine:
                 }
         
         return results
+    
+    def _estimate_gpd_parameters(self, excess: pd.Series) -> Tuple[float, float]:
+        """Estimate Generalized Pareto Distribution parameters."""
+        # Method of moments estimation
+        mean_excess = excess.mean()
+        var_excess = excess.var()
+        
+        if var_excess > 0:
+            xi = 0.5 * ((mean_excess ** 2) / var_excess + 1)
+            beta = 0.5 * mean_excess * ((mean_excess ** 2) / var_excess + 1)
+            return max(0.1, min(xi, 0.9)), max(0.001, beta)
+        else:
+            return 0.1, max(0.001, mean_excess)
     
     def create_portfolio_allocation_sunburst(self, weights: Dict, 
                                            asset_metadata: Dict) -> go.Figure:
@@ -1301,22 +1373,23 @@ class AdvancedVisualizationEngine:
         
         # Define metrics to display
         key_metrics = {
-            'Sharpe Ratio': metrics.get('Sharpe Ratio', 0),
-            'Sortino Ratio': metrics.get('Sortino Ratio', 0),
-            'Calmar Ratio': metrics.get('Calmar Ratio', 0),
-            'Omega Ratio': metrics.get('Omega Ratio', 0),
-            'Information Ratio': metrics.get('Information Ratio', 0),
-            'Treynor Ratio': metrics.get('Treynor Ratio', 0),
-            'Max Drawdown': metrics.get('Maximum Drawdown', 0),
-            'Volatility': metrics.get('Annual Volatility', 0),
-            'Beta': metrics.get('Beta', 1),
-            'Alpha': metrics.get('Alpha (Annual)', 0),
-            'R-squared': metrics.get('R-Squared', 0),
-            'Tracking Error': metrics.get('Tracking Error', 0)
+            'Sharpe Ratio': metrics.get('sharpe_ratio', 0),
+            'Sortino Ratio': metrics.get('sortino_ratio', 0),
+            'Calmar Ratio': metrics.get('calmar_ratio', 0),
+            'Omega Ratio': metrics.get('omega_ratio', 1),
+            'Information Ratio': metrics.get('information_ratio', 0),
+            'Treynor Ratio': metrics.get('treynor_ratio', 0),
+            'Max Drawdown': metrics.get('max_drawdown', 0),
+            'Volatility': metrics.get('expected_volatility', 0.2),
+            'Beta': metrics.get('beta', 1),
+            'Alpha': metrics.get('alpha', 0),
+            'R-squared': metrics.get('r_squared', 0.5),
+            'Tracking Error': metrics.get('tracking_error', 0.1)
         }
         
-        # Filter out None values
-        key_metrics = {k: v for k, v in key_metrics.items() if v is not None}
+        # Filter out None values and ensure numeric
+        key_metrics = {k: (v if v is not None and np.isfinite(v) else 0) 
+                      for k, v in key_metrics.items()}
         
         # Create subplot with gauges and indicators
         n_metrics = len(key_metrics)
@@ -1360,9 +1433,6 @@ class AdvancedVisualizationEngine:
                 display_value = max(min_val, min(max_val, value))
             else:
                 display_value = (min_val + max_val) / 2
-            
-            # Determine gauge color based on value
-            norm_value = (display_value - min_val) / (max_val - min_val) if max_val > min_val else 0.5
             
             fig.add_trace(
                 go.Indicator(
@@ -1477,30 +1547,35 @@ class AdvancedRiskAnalytics:
         }
         
         try:
+            # Clean returns
+            returns_clean = returns.dropna()
+            if len(returns_clean) < 50:
+                raise ValueError(f"Insufficient data points: {len(returns_clean)} (minimum 50 required)")
+            
             # Calculate VaR using all methods
             for method in self.methods:
                 results['methods'][method] = self._calculate_var_method(
-                    returns, method, self.confidence_levels, portfolio_value
+                    returns_clean, method, self.confidence_levels, portfolio_value
                 )
             
             # Calculate summary statistics
-            results['summary'] = self._calculate_var_summary(results['methods'], returns)
+            results['summary'] = self._calculate_var_summary(results['methods'], returns_clean)
             
             # Calculate VaR violations
             results['violations'] = self._calculate_var_violations(
-                returns, results['methods']['Historical']
+                returns_clean, results['methods']['Historical']
             )
             
             # Perform backtesting
             results['backtest'] = self._perform_var_backtesting(
-                returns, results['methods']['Historical']
+                returns_clean, results['methods']['Historical']
             )
             
             # Perform stress tests
-            results['stress_tests'] = self._perform_stress_tests(returns)
+            results['stress_tests'] = self._perform_stress_tests(returns_clean)
             
             # Calculate additional risk metrics
-            results['additional_metrics'] = self._calculate_additional_risk_metrics(returns)
+            results['additional_metrics'] = self._calculate_additional_risk_metrics(returns_clean)
             
             performance_monitor.end_operation('comprehensive_var_analysis')
             return results
@@ -1522,7 +1597,8 @@ class AdvancedRiskAnalytics:
             if method == 'Historical':
                 # Historical simulation
                 var = -np.percentile(returns, alpha * 100)
-                cvar = -returns[returns <= -var].mean() if len(returns[returns <= -var]) > 0 else var * 1.2
+                cvar_data = returns[returns <= -var]
+                cvar = -cvar_data.mean() if len(cvar_data) > 0 else var * 1.2
                 es = cvar
                 
             elif method == 'Parametric':
@@ -1543,7 +1619,8 @@ class AdvancedRiskAnalytics:
                 n_simulations = 5000
                 simulated_returns = np.random.normal(returns.mean(), returns.std(), n_simulations)
                 var = -np.percentile(simulated_returns, alpha * 100)
-                cvar = -simulated_returns[simulated_returns <= -var].mean() if len(simulated_returns[simulated_returns <= -var]) > 0 else var * 1.2
+                cvar_data = simulated_returns[simulated_returns <= -var]
+                cvar = -cvar_data.mean() if len(cvar_data) > 0 else var * 1.2
                 es = cvar
                 
             elif method == 'EVT':
@@ -1567,12 +1644,14 @@ class AdvancedRiskAnalytics:
                     else:
                         # Fallback to historical
                         var = -np.percentile(returns, alpha * 100)
-                        cvar = -returns[returns <= -var].mean() if len(returns[returns <= -var]) > 0 else var * 1.2
+                        cvar_data = returns[returns <= -var]
+                        cvar = -cvar_data.mean() if len(cvar_data) > 0 else var * 1.2
                         es = cvar
                         
                 except:
                     var = -np.percentile(returns, alpha * 100)
-                    cvar = -returns[returns <= -var].mean() if len(returns[returns <= -var]) > 0 else var * 1.2
+                    cvar_data = returns[returns <= -var]
+                    cvar = -cvar_data.mean() if len(cvar_data) > 0 else var * 1.2
                     es = cvar
                     
             elif method == 'GARCH':
@@ -1603,7 +1682,8 @@ class AdvancedRiskAnalytics:
             else:
                 # Default to historical
                 var = -np.percentile(returns, alpha * 100)
-                cvar = -returns[returns <= -var].mean() if len(returns[returns <= -var]) > 0 else var * 1.2
+                cvar_data = returns[returns <= -var]
+                cvar = -cvar_data.mean() if len(cvar_data) > 0 else var * 1.2
                 es = cvar
             
             # Store results
@@ -1652,14 +1732,18 @@ class AdvancedRiskAnalytics:
         if var_values:
             summary['average_var'] = np.mean(var_values)
             summary['worst_case_var'] = np.max(var_values)
-            summary['var_consistency'] = np.std(var_values) / np.mean(var_values) if np.mean(var_values) != 0 else 0
+            if np.mean(var_values) != 0:
+                summary['var_consistency'] = np.std(var_values) / np.mean(var_values)
         
         # Determine best method (lowest average VaR with consistency)
         method_scores = {}
         for method, results in methods_results.items():
             method_vars = [metrics['VaR'] for metrics in results.values()]
             avg_var = np.mean(method_vars)
-            consistency = np.std(method_vars) / avg_var if avg_var != 0 else float('inf')
+            if avg_var != 0:
+                consistency = np.std(method_vars) / avg_var
+            else:
+                consistency = float('inf')
             
             # Score = average VaR * (1 + consistency penalty)
             method_scores[method] = avg_var * (1 + consistency * 0.5)
@@ -1690,7 +1774,7 @@ class AdvancedRiskAnalytics:
         
         # Adjust based on kurtosis (fat tails = liquidity risk)
         kurt = returns.kurtosis()
-        if kurt > 3:  # Leptokurtic (fat tails)
+        if not np.isnan(kurt) and kurt > 3:  # Leptokurtic (fat tails)
             volume_factor *= 1.1 + min(0.5, (kurt - 3) / 10)
         
         return volume_factor
@@ -1703,13 +1787,15 @@ class AdvancedRiskAnalytics:
     def _calculate_tail_risk_adjustment(self, returns: pd.Series) -> float:
         """Calculate tail risk adjustment factor."""
         # Calculate expected shortfall ratio
-        var_95 = -np.percentile(returns, 5)
-        cvar_95 = -returns[returns <= -var_95].mean() if len(returns[returns <= -var_95]) > 0 else var_95
-        
-        if var_95 != 0:
-            tail_ratio = cvar_95 / var_95
-            # Higher tail ratio indicates heavier tails
-            return 1.0 + max(0, (tail_ratio - 1.5) * 0.2)
+        if len(returns) > 0:
+            var_95 = -np.percentile(returns, 5)
+            cvar_95_data = returns[returns <= -var_95]
+            cvar_95 = -cvar_95_data.mean() if len(cvar_95_data) > 0 else var_95
+            
+            if var_95 != 0:
+                tail_ratio = cvar_95 / var_95
+                # Higher tail ratio indicates heavier tails
+                return 1.0 + max(0, (tail_ratio - 1.5) * 0.2)
         
         return 1.0
     
@@ -1782,15 +1868,19 @@ class AdvancedRiskAnalytics:
         # Calculate rolling VaR
         windows = [63, 126, 252]  # 3, 6, 12 months
         for window in windows:
-            rolling_var = returns.rolling(window=window).apply(
-                lambda x: -np.percentile(x, 5), raw=True
-            )
-            backtest['rolling_var'][window] = {
-                'mean': rolling_var.mean(),
-                'std': rolling_var.std(),
-                'max': rolling_var.max(),
-                'min': rolling_var.min()
-            }
+            try:
+                rolling_var = returns.rolling(window=window).apply(
+                    lambda x: -np.percentile(x, 5) if len(x.dropna()) >= 20 else np.nan, raw=True
+                ).dropna()
+                if not rolling_var.empty:
+                    backtest['rolling_var'][window] = {
+                        'mean': rolling_var.mean(),
+                        'std': rolling_var.std(),
+                        'max': rolling_var.max(),
+                        'min': rolling_var.min()
+                    }
+            except Exception as e:
+                continue
         
         # Check for violation clustering (Christoffersen's independence test)
         if 0.95 in historical_results:
@@ -1813,30 +1903,36 @@ class AdvancedRiskAnalytics:
             if (n00 + n01) > 0 and (n10 + n11) > 0:
                 pi0 = n01 / (n00 + n01) if (n00 + n01) > 0 else 0
                 pi1 = n11 / (n10 + n11) if (n10 + n11) > 0 else 0
-                pi = (n01 + n11) / (n00 + n01 + n10 + n11) if (n00 + n01 + n10 + n11) > 0 else 0
+                pi_total = n00 + n01 + n10 + n11
+                pi = (n01 + n11) / pi_total if pi_total > 0 else 0
                 
                 if pi0 > 0 and pi1 > 0 and pi > 0:
-                    likelihood_ratio = -2 * np.log(
-                        ((1 - pi) ** (n00 + n10) * pi ** (n01 + n11)) /
-                        ((1 - pi0) ** n00 * pi0 ** n01 * (1 - pi1) ** n10 * pi1 ** n11)
-                    )
-                    
-                    backtest['conditional_coverage'] = {
-                        'LR_statistic': likelihood_ratio,
-                        'p_value': 1 - stats.chi2.cdf(likelihood_ratio, 1) if not np.isnan(likelihood_ratio) else 1.0,
-                        'pass': likelihood_ratio < 3.841 if not np.isnan(likelihood_ratio) else True
-                    }
+                    try:
+                        likelihood_ratio = -2 * np.log(
+                            ((1 - pi) ** (n00 + n10) * pi ** (n01 + n11)) /
+                            ((1 - pi0) ** n00 * pi0 ** n01 * (1 - pi1) ** n10 * pi1 ** n11)
+                        )
+                        
+                        backtest['conditional_coverage'] = {
+                            'LR_statistic': likelihood_ratio,
+                            'p_value': 1 - stats.chi2.cdf(likelihood_ratio, 1) if not np.isnan(likelihood_ratio) else 1.0,
+                            'pass': likelihood_ratio < 3.841 if not np.isnan(likelihood_ratio) else True
+                        }
+                    except Exception as e:
+                        backtest['conditional_coverage'] = {'error': str(e)}
         
         # Calculate duration between failures
-        violations_idx = np.where(returns < -historical_results[0.95]['VaR'])[0]
-        if len(violations_idx) > 1:
-            durations = np.diff(violations_idx)
-            backtest['duration_between_failures'] = {
-                'mean': durations.mean() if len(durations) > 0 else 0,
-                'std': durations.std() if len(durations) > 0 else 0,
-                'min': durations.min() if len(durations) > 0 else 0,
-                'max': durations.max() if len(durations) > 0 else 0
-            }
+        if 0.95 in historical_results:
+            var_threshold = -historical_results[0.95]['VaR']
+            violations_idx = np.where(returns < -var_threshold)[0]
+            if len(violations_idx) > 1:
+                durations = np.diff(violations_idx)
+                backtest['duration_between_failures'] = {
+                    'mean': durations.mean() if len(durations) > 0 else 0,
+                    'std': durations.std() if len(durations) > 0 else 0,
+                    'min': durations.min() if len(durations) > 0 else 0,
+                    'max': durations.max() if len(durations) > 0 else 0
+                }
         
         return backtest
     
@@ -1857,26 +1953,36 @@ class AdvancedRiskAnalytics:
         
         for scenario, (start, end) in historical_periods.items():
             try:
-                if isinstance(returns.index[0], pd.Timestamp):
-                    mask = (returns.index >= pd.Timestamp(start)) & (returns.index <= pd.Timestamp(end))
-                    if mask.any():
-                        period_returns = returns[mask]
-                        if len(period_returns) > 10:
-                            var_95 = -np.percentile(period_returns, 5)
-                            cvar_95_data = period_returns[period_returns <= -var_95]
-                            cvar_95 = -cvar_95_data.mean() if len(cvar_95_data) > 0 else var_95
-                            
-                            stress_tests['historical_scenarios'][scenario] = {
-                                'returns': period_returns.mean() * 252,
-                                'volatility': period_returns.std() * np.sqrt(252),
-                                'max_drawdown': self._calculate_max_drawdown(period_returns),
-                                'var_95': var_95,
-                                'cvar_95': cvar_95
-                            }
-            except:
+                start_date = pd.Timestamp(start)
+                end_date = pd.Timestamp(end)
+                
+                # Check if returns index is datetime-like
+                if hasattr(returns.index, 'tz_localize'):
+                    returns_local = returns.tz_localize(None)
+                else:
+                    returns_local = returns.copy()
+                
+                mask = (returns_local.index >= start_date) & (returns_local.index <= end_date)
+                if mask.any():
+                    period_returns = returns_local[mask]
+                    if len(period_returns) > 10:
+                        var_95 = -np.percentile(period_returns, 5)
+                        cvar_95_data = period_returns[period_returns <= -var_95]
+                        cvar_95 = -cvar_95_data.mean() if len(cvar_95_data) > 0 else var_95
+                        
+                        stress_tests['historical_scenarios'][scenario] = {
+                            'returns': period_returns.mean() * 252,
+                            'volatility': period_returns.std() * np.sqrt(252),
+                            'max_drawdown': self._calculate_max_drawdown(period_returns),
+                            'var_95': var_95,
+                            'cvar_95': cvar_95
+                        }
+            except Exception as e:
                 continue
         
         # Hypothetical scenarios
+        mean_return = returns.mean()
+        std_return = returns.std()
         hypothetical_scenarios = {
             'Market Crash (-20%)': {'return_shock': -0.20, 'vol_multiplier': 2.0},
             'Volatility Spike': {'return_shock': -0.10, 'vol_multiplier': 3.0},
@@ -1884,26 +1990,39 @@ class AdvancedRiskAnalytics:
         }
         
         for scenario, params in hypothetical_scenarios.items():
-            mean_return = returns.mean()
-            std_return = returns.std()
-            stress_tests['hypothetical_scenarios'][scenario] = {
-                'stressed_return': mean_return * 252 + params['return_shock'],
-                'stressed_volatility': std_return * np.sqrt(252) * params['vol_multiplier'],
-                'stressed_var_95': -(mean_return + std_return * params['vol_multiplier'] * norm.ppf(0.95)),
-                'description': f"Return shock: {params['return_shock']:.1%}, Volatility multiplier: {params['vol_multiplier']}x"
-            }
+            try:
+                if std_return > 0:
+                    stressed_var_95 = -(mean_return + std_return * params['vol_multiplier'] * norm.ppf(0.95))
+                else:
+                    stressed_var_95 = -mean_return
+                
+                stress_tests['hypothetical_scenarios'][scenario] = {
+                    'stressed_return': mean_return * 252 + params['return_shock'],
+                    'stressed_volatility': std_return * np.sqrt(252) * params['vol_multiplier'],
+                    'stressed_var_95': stressed_var_95,
+                    'description': f"Return shock: {params['return_shock']:.1%}, Volatility multiplier: {params['vol_multiplier']}x"
+                }
+            except Exception as e:
+                continue
         
         # Reverse stress tests
         target_losses = [0.10, 0.20, 0.30]  # 10%, 20%, 30% losses
         for loss in target_losses:
-            std_return = returns.std()
-            if std_return > 0:
-                required_shock = norm.ppf(0.01) * std_return  # 99% confidence
+            try:
+                if std_return > 0:
+                    required_shock = norm.ppf(0.01) * std_return  # 99% confidence
+                    probability = norm.cdf(-loss / std_return) if std_return > 0 else 0
+                else:
+                    required_shock = 0
+                    probability = 0
+                    
                 stress_tests['reverse_stress_tests'][f'{loss:.0%}_Loss'] = {
                     'required_shock': required_shock,
-                    'probability': norm.cdf(-loss / std_return) if std_return > 0 else 0,
+                    'probability': probability,
                     'daily_return_required': -loss
                 }
+            except Exception as e:
+                continue
         
         return stress_tests
     
@@ -1916,27 +2035,46 @@ class AdvancedRiskAnalytics:
             'concentration_risk': {}
         }
         
-        # Expected Shortfall Ratio (CVaR / VaR)
-        var_95 = -np.percentile(returns, 5)
-        cvar_95_data = returns[returns <= -var_95]
-        cvar_95 = -cvar_95_data.mean() if len(cvar_95_data) > 0 else var_95
-        
-        if var_95 != 0:
-            metrics['expected_shortfall_ratio'] = cvar_95 / var_95
-        
-        # Tail risk measures
-        metrics['tail_risk_measures'] = {
-            'skewness': returns.skew(),
-            'excess_kurtosis': returns.kurtosis(),
-            'tail_index': self._calculate_tail_index(returns),
-            'extreme_value_index': self._calculate_extreme_value_index(returns)
-        }
-        
-        # Liquidity risk (simplified)
-        metrics['liquidity_risk'] = {
-            'illiquidity_ratio': self._calculate_illiquidity_ratio(returns),
-            'volume_volatility_ratio': returns.std() / (abs(returns).mean() if abs(returns).mean() > 0 else 1)
-        }
+        if len(returns) > 0:
+            # Expected Shortfall Ratio (CVaR / VaR)
+            var_95 = -np.percentile(returns, 5)
+            cvar_95_data = returns[returns <= -var_95]
+            cvar_95 = -cvar_95_data.mean() if len(cvar_95_data) > 0 else var_95
+            
+            if var_95 != 0:
+                metrics['expected_shortfall_ratio'] = cvar_95 / var_95
+            
+            # Tail risk measures
+            try:
+                skewness_val = returns.skew()
+                kurtosis_val = returns.kurtosis()
+                metrics['tail_risk_measures'] = {
+                    'skewness': skewness_val if not np.isnan(skewness_val) else 0,
+                    'excess_kurtosis': kurtosis_val if not np.isnan(kurtosis_val) else 0,
+                    'tail_index': self._calculate_tail_index(returns),
+                    'extreme_value_index': self._calculate_extreme_value_index(returns)
+                }
+            except:
+                metrics['tail_risk_measures'] = {
+                    'skewness': 0,
+                    'excess_kurtosis': 0,
+                    'tail_index': 0,
+                    'extreme_value_index': 0
+                }
+            
+            # Liquidity risk (simplified)
+            try:
+                illiquidity_ratio = self._calculate_illiquidity_ratio(returns)
+                volume_volatility_ratio = returns.std() / (abs(returns).mean() if abs(returns).mean() > 0 else 1)
+                metrics['liquidity_risk'] = {
+                    'illiquidity_ratio': illiquidity_ratio,
+                    'volume_volatility_ratio': volume_volatility_ratio if not np.isnan(volume_volatility_ratio) else 0
+                }
+            except:
+                metrics['liquidity_risk'] = {
+                    'illiquidity_ratio': 0,
+                    'volume_volatility_ratio': 0
+                }
         
         return metrics
     
@@ -1958,7 +2096,8 @@ class AdvancedRiskAnalytics:
     def _calculate_extreme_value_index(self, returns: pd.Series) -> float:
         """Calculate extreme value index."""
         try:
-            excess = returns[returns < returns.quantile(0.10)] - returns.quantile(0.10)
+            threshold = returns.quantile(0.10)
+            excess = returns[returns < threshold] - threshold
             if len(excess) > 0 and excess.mean() != 0:
                 return (excess.var() / (excess.mean() ** 2) - 1) / 2
         except:
@@ -1969,8 +2108,10 @@ class AdvancedRiskAnalytics:
         """Calculate illiquidity ratio (Amihud measure approximation)."""
         try:
             if len(returns) > 0:
-                return_value = abs(returns).mean() / (returns.max() - returns.min() if returns.max() != returns.min() else 1)
-                return return_value if not np.isnan(return_value) else 0
+                returns_mean = abs(returns).mean()
+                returns_range = returns.max() - returns.min()
+                if returns_range != 0:
+                    return returns_mean / returns_range
         except:
             pass
         return 0
@@ -1978,6 +2119,9 @@ class AdvancedRiskAnalytics:
     def _calculate_max_drawdown(self, returns: pd.Series) -> float:
         """Calculate maximum drawdown."""
         try:
+            if len(returns) == 0:
+                return 0
+                
             cumulative = (1 + returns).cumprod()
             rolling_max = cumulative.expanding().max()
             drawdown = (cumulative - rolling_max) / rolling_max
@@ -1988,9 +2132,14 @@ class AdvancedRiskAnalytics:
     def _create_fallback_results(self, returns: pd.Series, 
                                 portfolio_value: float) -> Dict:
         """Create fallback results when comprehensive analysis fails."""
-        var_95 = -np.percentile(returns, 5)
-        cvar_95_data = returns[returns <= -var_95]
-        cvar_95 = -cvar_95_data.mean() if len(cvar_95_data) > 0 else var_95 * 1.2
+        returns_clean = returns.dropna()
+        if len(returns_clean) > 0:
+            var_95 = -np.percentile(returns_clean, 5)
+            cvar_95_data = returns_clean[returns_clean <= -var_95]
+            cvar_95 = -cvar_95_data.mean() if len(cvar_95_data) > 0 else var_95 * 1.2
+        else:
+            var_95 = 0
+            cvar_95 = 0
         
         return {
             'methods': {
@@ -2015,13 +2164,13 @@ class AdvancedRiskAnalytics:
                 'var_consistency': 0
             },
             'violations': {
-                'total_days': len(returns),
-                'violations_95': (returns < var_95).sum(),
+                'total_days': len(returns_clean),
+                'violations_95': (returns_clean < var_95).sum() if len(returns_clean) > 0 else 0,
                 'exception_rates': {
                     0.95: {
-                        'actual': (returns < var_95).sum() / len(returns),
+                        'actual': (returns_clean < var_95).sum() / len(returns_clean) if len(returns_clean) > 0 else 0,
                         'expected': 0.05,
-                        'difference': (returns < var_95).sum() / len(returns) - 0.05
+                        'difference': (returns_clean < var_95).sum() / len(returns_clean) - 0.05 if len(returns_clean) > 0 else -0.05
                     }
                 }
             }
@@ -2059,16 +2208,21 @@ class AdvancedPortfolioOptimizer:
         performance_monitor.start_operation(f'portfolio_optimization_{method}')
         
         try:
+            # Clean returns
+            returns_clean = returns.dropna()
+            if len(returns_clean.columns) < 2:
+                raise ValueError("Need at least 2 assets for optimization")
+            
             if method in self.optimization_methods:
                 weights, metrics = self.optimization_methods[method](
-                    returns, constraints, risk_free_rate
+                    returns_clean, constraints, risk_free_rate
                 )
             else:
                 # Default to max Sharpe
-                weights, metrics = self._optimize_max_sharpe(returns, constraints, risk_free_rate)
+                weights, metrics = self._optimize_max_sharpe(returns_clean, constraints, risk_free_rate)
             
             # Calculate additional metrics
-            additional_metrics = self._calculate_additional_metrics(returns, weights, risk_free_rate)
+            additional_metrics = self._calculate_additional_metrics(returns_clean, weights, risk_free_rate)
             metrics.update(additional_metrics)
             
             # Create comprehensive results
@@ -2125,8 +2279,9 @@ class AdvancedPortfolioOptimizer:
                         'expected_volatility': perf[1],
                         'sharpe_ratio': perf[2]
                     }
-                except:
-                    pass  # Fall through to simplified implementation
+                except Exception as e:
+                    # Fall through to simplified implementation
+                    pass
         
         except Exception as e:
             pass
@@ -2225,7 +2380,7 @@ class AdvancedPortfolioOptimizer:
                         'expected_volatility': perf[1],
                         'sharpe_ratio': (perf[0] - risk_free_rate) / perf[1] if perf[1] > 0 else 0
                     }
-                except:
+                except Exception as e:
                     pass  # Fall through to simplified implementation
         
         except Exception as e:
@@ -2298,7 +2453,7 @@ class AdvancedPortfolioOptimizer:
                         'expected_volatility': perf[1],
                         'sharpe_ratio': (perf[0] - risk_free_rate) / perf[1] if perf[1] > 0 else 0
                     }
-                except:
+                except Exception as e:
                     pass  # Fall through to simplified implementation
         
         except Exception as e:
@@ -2489,7 +2644,7 @@ class AdvancedPortfolioOptimizer:
                         'expected_volatility': port_risk,
                         'sharpe_ratio': (port_return - risk_free_rate) / port_risk if port_risk > 0 else 0
                     }
-                except:
+                except Exception as e:
                     pass  # Fall through to risk parity
         
         except Exception as e:
@@ -2521,7 +2676,7 @@ class AdvancedPortfolioOptimizer:
                         'expected_volatility': perf[1],
                         'sharpe_ratio': perf[2]
                     }
-                except:
+                except Exception as e:
                     pass  # Fall through to max sharpe
         
         except Exception as e:
@@ -2673,7 +2828,7 @@ class AdvancedPortfolioOptimizer:
         try:
             # Simple robust optimization using bootstrapping
             n_assets = len(returns.columns)
-            n_bootstrap = 50
+            n_bootstrap = 20  # Reduced for performance
             
             # Bootstrap expected returns and covariance
             bootstrap_returns = []
@@ -2708,7 +2863,7 @@ class AdvancedPortfolioOptimizer:
                 bounds=bounds,
                 constraints=constraints_opt,
                 method='SLSQP',
-                options={'maxiter': 500}
+                options={'maxiter': 200}  # Reduced for performance
             )
             
             if result.success:
@@ -2739,7 +2894,7 @@ class AdvancedPortfolioOptimizer:
     def _calculate_robustness_score(self, returns: pd.DataFrame, weights: np.ndarray) -> float:
         """Calculate robustness score of the portfolio."""
         try:
-            n_bootstrap = 20
+            n_bootstrap = 10  # Reduced for performance
             performances = []
             
             for _ in range(n_bootstrap):
@@ -2796,16 +2951,21 @@ class AdvancedPortfolioOptimizer:
                 metrics['sortino_ratio'] = (port_return - risk_free_rate) / downside_vol if downside_vol > 0 else 0
             else:
                 metrics['downside_volatility'] = 0
-                metrics['sortino_ratio'] = float('inf')
+                metrics['sortino_ratio'] = float('inf') if port_return > risk_free_rate else 0
             
             # Maximum drawdown
-            cumulative = (1 + portfolio_returns).cumprod()
-            rolling_max = cumulative.expanding().max()
-            drawdown = (cumulative - rolling_max) / rolling_max
-            metrics['max_drawdown'] = drawdown.min() if not drawdown.empty else 0
-            if metrics['max_drawdown'] < 0:
-                metrics['calmar_ratio'] = port_return / abs(metrics['max_drawdown'])
+            if len(portfolio_returns) > 0:
+                cumulative = (1 + portfolio_returns).cumprod()
+                rolling_max = cumulative.expanding().max()
+                drawdown = (cumulative - rolling_max) / rolling_max
+                max_dd = drawdown.min() if not drawdown.empty else 0
+                metrics['max_drawdown'] = max_dd
+                if max_dd < 0:
+                    metrics['calmar_ratio'] = port_return / abs(max_dd)
+                else:
+                    metrics['calmar_ratio'] = 0
             else:
+                metrics['max_drawdown'] = 0
                 metrics['calmar_ratio'] = 0
             
             # Omega ratio
@@ -2824,16 +2984,25 @@ class AdvancedPortfolioOptimizer:
             metrics['effective_n_assets'] = 1 / metrics['herfindahl_index'] if metrics['herfindahl_index'] > 0 else len(w_array)
             
             # Skewness and kurtosis
-            metrics['skewness'] = portfolio_returns.skew()
-            metrics['kurtosis'] = portfolio_returns.kurtosis()
+            if len(portfolio_returns) > 0:
+                metrics['skewness'] = portfolio_returns.skew()
+                metrics['kurtosis'] = portfolio_returns.kurtosis()
+            else:
+                metrics['skewness'] = 0
+                metrics['kurtosis'] = 0
             
             # Tail risk
-            var_95 = -np.percentile(portfolio_returns, 5)
-            cvar_95_data = portfolio_returns[portfolio_returns <= -var_95]
-            cvar_95 = -cvar_95_data.mean() if len(cvar_95_data) > 0 else var_95
-            metrics['var_95'] = var_95
-            metrics['cvar_95'] = cvar_95
-            metrics['expected_shortfall_ratio'] = cvar_95 / var_95 if var_95 != 0 else 0
+            if len(portfolio_returns) > 0:
+                var_95 = -np.percentile(portfolio_returns, 5)
+                cvar_95_data = portfolio_returns[portfolio_returns <= -var_95]
+                cvar_95 = -cvar_95_data.mean() if len(cvar_95_data) > 0 else var_95
+                metrics['var_95'] = var_95
+                metrics['cvar_95'] = cvar_95
+                metrics['expected_shortfall_ratio'] = cvar_95 / var_95 if var_95 != 0 else 0
+            else:
+                metrics['var_95'] = 0
+                metrics['cvar_95'] = 0
+                metrics['expected_shortfall_ratio'] = 0
             
             # Turnover estimation (simplified)
             metrics['estimated_turnover'] = self._estimate_turnover(weights, returns)
@@ -2984,8 +3153,8 @@ class AdvancedDataManager:
                 'prices': pd.DataFrame(),
                 'returns': pd.DataFrame(),
                 'volumes': pd.DataFrame(),
-                'dividends': pd.DataFrame(),
-                'splits': pd.DataFrame(),
+                'dividends': {},
+                'splits': {},
                 'metadata': {},
                 'errors': {}
             }
@@ -3029,12 +3198,8 @@ class AdvancedDataManager:
                             
                             # Store dividends and splits
                             if not ticker_data['dividends'].empty:
-                                if 'dividends' not in data:
-                                    data['dividends'] = {}
                                 data['dividends'][ticker] = ticker_data['dividends']
                             if not ticker_data['splits'].empty:
-                                if 'splits' not in data:
-                                    data['splits'] = {}
                                 data['splits'][ticker] = ticker_data['splits']
                                 
                         else:
@@ -3163,28 +3328,29 @@ class AdvancedDataManager:
             
             # Calculate basic statistics for each asset
             for ticker in returns.columns:
-                ticker_returns = returns[ticker]
+                ticker_returns = returns[ticker].dropna()
                 
-                # Basic statistics
-                features['statistical_features'][ticker] = {
-                    'mean': ticker_returns.mean(),
-                    'std': ticker_returns.std(),
-                    'skewness': ticker_returns.skew(),
-                    'kurtosis': ticker_returns.kurtosis(),
-                    'sharpe_ratio': ticker_returns.mean() / ticker_returns.std() if ticker_returns.std() > 0 else 0,
-                    'max_drawdown': self._calculate_max_drawdown_series(ticker_returns)
-                }
-                
-                # Risk metrics
-                var_95 = -np.percentile(ticker_returns, 5)
-                cvar_95_data = ticker_returns[ticker_returns <= -var_95]
-                cvar_95 = -cvar_95_data.mean() if len(cvar_95_data) > 0 else var_95
-                
-                features['risk_metrics'][ticker] = {
-                    'var_95': var_95,
-                    'cvar_95': cvar_95,
-                    'expected_shortfall': cvar_95
-                }
+                if len(ticker_returns) > 0:
+                    # Basic statistics
+                    features['statistical_features'][ticker] = {
+                        'mean': ticker_returns.mean(),
+                        'std': ticker_returns.std(),
+                        'skewness': ticker_returns.skew(),
+                        'kurtosis': ticker_returns.kurtosis(),
+                        'sharpe_ratio': ticker_returns.mean() / ticker_returns.std() if ticker_returns.std() > 0 else 0,
+                        'max_drawdown': self._calculate_max_drawdown_series(ticker_returns)
+                    }
+                    
+                    # Risk metrics
+                    var_95 = -np.percentile(ticker_returns, 5)
+                    cvar_95_data = ticker_returns[ticker_returns <= -var_95]
+                    cvar_95 = -cvar_95_data.mean() if len(cvar_95_data) > 0 else var_95
+                    
+                    features['risk_metrics'][ticker] = {
+                        'var_95': var_95,
+                        'cvar_95': cvar_95,
+                        'expected_shortfall': cvar_95
+                    }
             
             # Calculate correlation matrix
             features['correlation_matrix'] = returns.corr()
@@ -3200,6 +3366,8 @@ class AdvancedDataManager:
     def _calculate_max_drawdown_series(self, returns: pd.Series) -> float:
         """Calculate maximum drawdown for a return series."""
         try:
+            if len(returns) == 0:
+                return 0
             cumulative = (1 + returns).cumprod()
             rolling_max = cumulative.expanding().max()
             drawdown = (cumulative - rolling_max) / rolling_max
@@ -3428,16 +3596,25 @@ class EnhancedUIComponents:
             """, unsafe_allow_html=True)
             
             if change is not None:
-                change_color = "#00cc96" if (isinstance(change, str) and "+" in change) or (isinstance(change, (int, float)) and change > 0) else "#ef553b"
-                st.markdown(f"""
-                <div style="
-                    font-size: 0.8rem;
-                    color: {change_color};
-                    font-weight: 600;
-                ">
-                    {change}
-                </div>
-            """, unsafe_allow_html=True)
+                try:
+                    if isinstance(change, str):
+                        change_color = "#00cc96" if "+" in change else "#ef553b"
+                    elif isinstance(change, (int, float)):
+                        change_color = "#00cc96" if change > 0 else "#ef553b"
+                    else:
+                        change_color = "#94a3b8"
+                    
+                    st.markdown(f"""
+                    <div style="
+                        font-size: 0.8rem;
+                        color: {change_color};
+                        font-weight: 600;
+                    ">
+                        {change}
+                    </div>
+                """, unsafe_allow_html=True)
+                except:
+                    pass
             
             st.markdown("</div>", unsafe_allow_html=True)
     
@@ -3566,7 +3743,8 @@ class QuantEdgeProEnhanced:
             'analysis_complete': False,
             'data_fetched': False,
             'analysis_running': False,
-            'config': None
+            'config': None,
+            'last_fetch_time': None
         }
         
         for key, value in defaults.items():
@@ -3790,6 +3968,14 @@ class QuantEdgeProEnhanced:
                 self._reset_analysis()
                 st.rerun()
             
+            # Add refresh button if data was fetched recently
+            if st.session_state.last_fetch_time:
+                time_since_fetch = (datetime.now() - st.session_state.last_fetch_time).seconds / 60
+                if time_since_fetch > 10:  # 10 minutes
+                    if st.button("🔄 Refresh Data", use_container_width=True, key="refresh"):
+                        st.session_state.data_fetched = False
+                        st.rerun()
+            
             return config, fetch_clicked, run_clicked
     
     def run_data_fetch(self, config: Dict):
@@ -3803,11 +3989,18 @@ class QuantEdgeProEnhanced:
                 # Update progress
                 st.session_state.current_step = 1
                 
+                # Create progress bar
+                progress_bar = st.progress(0)
+                
+                def progress_callback(progress, message):
+                    progress_bar.progress(progress, text=message)
+                
                 # Fetch data
                 portfolio_data = self.data_manager.fetch_advanced_market_data(
                     tickers=config['tickers'],
                     start_date=config['start_date'],
-                    end_date=config['end_date']
+                    end_date=config['end_date'],
+                    progress_callback=progress_callback
                 )
                 
                 # Validate data
@@ -3817,6 +4010,10 @@ class QuantEdgeProEnhanced:
                     st.session_state.portfolio_data = portfolio_data
                     st.session_state.data_fetched = True
                     st.session_state.config = config
+                    st.session_state.last_fetch_time = datetime.now()
+                    
+                    # Close progress bar
+                    progress_bar.empty()
                     
                     st.success(f"✅ Data fetched successfully!")
                     
@@ -3829,9 +4026,13 @@ class QuantEdgeProEnhanced:
                             st.metric("Date Range", validation['summary']['date_range'])
                         with col3:
                             st.metric("Data Points", validation['summary']['data_points'])
+                        
+                        if 'errors' in portfolio_data and portfolio_data['errors']:
+                            st.warning(f"⚠️ {len(portfolio_data['errors'])} assets failed to fetch")
                     
                     return True
                 else:
+                    progress_bar.empty()
                     st.error("❌ Data validation failed:")
                     for issue in validation['issues']:
                         st.write(f"• {issue}")
@@ -3840,6 +4041,9 @@ class QuantEdgeProEnhanced:
                     return False
                     
         except Exception as e:
+            if 'progress_bar' in locals():
+                progress_bar.empty()
+            
             error_analysis = error_analyzer.analyze_error_with_context(e, {
                 'operation': 'data_fetch',
                 'tickers': config['tickers'],
@@ -3874,10 +4078,14 @@ class QuantEdgeProEnhanced:
             # Check if we have enough data
             if prepared_data['returns_clean'].empty or len(prepared_data['returns_clean'].columns) < 2:
                 st.error("Insufficient data for analysis. Please check your data selection.")
+                st.session_state.analysis_running = False
                 return False
             
+            # Create progress containers
+            optimization_progress = st.progress(0, text="Optimizing portfolio...")
+            
             # Run portfolio optimization
-            with st.spinner("⚡ Optimizing portfolio..."):
+            try:
                 optimization_results = self.portfolio_optimizer.optimize_portfolio(
                     returns=prepared_data['returns_clean'],
                     method=config['optimization_method'],
@@ -3888,12 +4096,18 @@ class QuantEdgeProEnhanced:
                 )
                 
                 st.session_state.optimization_results = optimization_results
+                optimization_progress.progress(0.5, text="Portfolio optimized! Analyzing risk...")
+            except Exception as e:
+                optimization_progress.empty()
+                st.error(f"Optimization failed: {str(e)}")
+                st.session_state.analysis_running = False
+                return False
             
             # Run risk analysis
-            with st.spinner("📈 Analyzing risk metrics..."):
-                portfolio_returns = prepared_data['returns_clean'].dot(
-                    np.array(list(optimization_results['weights'].values()))
-                )
+            try:
+                # Calculate portfolio returns
+                weights_array = np.array(list(optimization_results['weights'].values()))
+                portfolio_returns = prepared_data['returns_clean'].dot(weights_array)
                 
                 risk_analysis_results = self.risk_analytics.calculate_comprehensive_var_analysis(
                     portfolio_returns,
@@ -3901,17 +4115,30 @@ class QuantEdgeProEnhanced:
                 )
                 
                 st.session_state.risk_analysis_results = risk_analysis_results
+                optimization_progress.progress(1.0, text="Analysis complete!")
+            except Exception as e:
+                optimization_progress.empty()
+                st.error(f"Risk analysis failed: {str(e)}")
+                st.session_state.analysis_running = False
+                return False
             
             # Update progress
             st.session_state.current_step = 3
             st.session_state.analysis_complete = True
             st.session_state.analysis_running = False
             
+            time.sleep(0.5)  # Let user see completion
+            optimization_progress.empty()
+            
             st.success("✅ Analysis complete!")
             return True
             
         except Exception as e:
             st.session_state.analysis_running = False
+            
+            if 'optimization_progress' in locals():
+                optimization_progress.empty()
+            
             error_analysis = error_analyzer.analyze_error_with_context(e, {
                 'operation': 'portfolio_analysis',
                 'optimization_method': config['optimization_method']
@@ -3973,11 +4200,20 @@ class QuantEdgeProEnhanced:
         with col1:
             # Create sunburst chart if metadata is available
             if st.session_state.portfolio_data and 'metadata' in st.session_state.portfolio_data:
-                fig = self.viz_engine.create_portfolio_allocation_sunburst(
-                    results['weights'],
-                    st.session_state.portfolio_data['metadata']
-                )
-                st.plotly_chart(fig, use_container_width=True)
+                try:
+                    fig = self.viz_engine.create_portfolio_allocation_sunburst(
+                        results['weights'],
+                        st.session_state.portfolio_data['metadata']
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                except Exception as e:
+                    st.warning(f"Sunburst chart error: {str(e)}")
+                    # Fallback to pie chart
+                    weights_df = pd.DataFrame.from_dict(results['weights'], orient='index', columns=['Weight'])
+                    fig = px.pie(weights_df, values='Weight', names=weights_df.index, 
+                                title='Portfolio Allocation')
+                    fig.update_layout(template='plotly_dark')
+                    st.plotly_chart(fig, use_container_width=True)
             else:
                 # Simple pie chart as fallback
                 weights_df = pd.DataFrame.from_dict(results['weights'], orient='index', columns=['Weight'])
@@ -4059,38 +4295,57 @@ class QuantEdgeProEnhanced:
         """Render VaR analysis dashboard."""
         # Get portfolio returns from optimization results
         if st.session_state.optimization_results and st.session_state.portfolio_data:
-            portfolio_returns = st.session_state.portfolio_data['returns_clean'].dot(
-                np.array(list(st.session_state.optimization_results['weights'].values()))
-            )
-            
-            # Create advanced VaR dashboard
-            fig = self.viz_engine.create_advanced_var_analysis_dashboard(portfolio_returns)
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # VaR summary
-            st.subheader("📋 VaR Summary")
-            
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric(
-                    "Best Method",
-                    results['summary'].get('best_method', 'N/A')
-                )
-            with col2:
-                st.metric(
-                    "Worst-Case VaR",
-                    f"{results['summary'].get('worst_case_var', 0):.3%}"
-                )
-            with col3:
-                st.metric(
-                    "Average VaR",
-                    f"{results['summary'].get('average_var', 0):.3%}"
-                )
-            with col4:
-                st.metric(
-                    "VaR Consistency",
-                    f"{results['summary'].get('var_consistency', 0):.3f}"
-                )
+            portfolio_returns = None
+            try:
+                # Calculate portfolio returns
+                if 'returns_clean' in st.session_state.portfolio_data:
+                    returns = st.session_state.portfolio_data['returns_clean']
+                    weights = st.session_state.optimization_results['weights']
+                    weights_array = np.array(list(weights.values()))
+                    portfolio_returns = returns.dot(weights_array)
+                else:
+                    # Fallback calculation
+                    returns = st.session_state.portfolio_data['returns']
+                    weights = st.session_state.optimization_results['weights']
+                    weights_array = np.array(list(weights.values()))
+                    portfolio_returns = returns.dot(weights_array)
+                
+                if portfolio_returns is not None and len(portfolio_returns.dropna()) > 0:
+                    # Create advanced VaR dashboard
+                    fig = self.viz_engine.create_advanced_var_analysis_dashboard(portfolio_returns)
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # VaR summary
+                    st.subheader("📋 VaR Summary")
+                    
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric(
+                            "Best Method",
+                            results['summary'].get('best_method', 'N/A')
+                        )
+                    with col2:
+                        worst_case_var = results['summary'].get('worst_case_var', 0)
+                        st.metric(
+                            "Worst-Case VaR",
+                            f"{worst_case_var:.3%}"
+                        )
+                    with col3:
+                        avg_var = results['summary'].get('average_var', 0)
+                        st.metric(
+                            "Average VaR",
+                            f"{avg_var:.3%}"
+                        )
+                    with col4:
+                        var_consistency = results['summary'].get('var_consistency', 0)
+                        st.metric(
+                            "VaR Consistency",
+                            f"{var_consistency:.3f}"
+                        )
+                else:
+                    st.warning("Insufficient portfolio return data for VaR dashboard")
+            except Exception as e:
+                st.error(f"Error creating VaR dashboard: {str(e)}")
     
     def _render_comparative_analysis(self, results: Dict):
         """Render comparative analysis."""
@@ -4184,6 +4439,10 @@ class QuantEdgeProEnhanced:
             
             if hypothetical_data:
                 st.dataframe(pd.DataFrame(hypothetical_data), use_container_width=True)
+        
+        # Show message if no stress test data
+        if not results.get('stress_tests'):
+            st.info("No stress test data available. Try running the analysis with more historical data.")
     
     def render_advanced_visualizations(self):
         """Render advanced visualizations."""
@@ -4212,59 +4471,80 @@ class QuantEdgeProEnhanced:
     def _render_3d_efficient_frontier(self):
         """Render 3D efficient frontier visualization."""
         if st.session_state.portfolio_data and st.session_state.optimization_results:
-            returns = st.session_state.portfolio_data['returns_clean']
-            
-            # Get risk-free rate from config
-            risk_free_rate = st.session_state.config.get('risk_free_rate', 0.045) if st.session_state.config else 0.045
-            
-            fig = self.viz_engine.create_3d_efficient_frontier(returns, risk_free_rate)
-            st.plotly_chart(fig, use_container_width=True)
-            
-            st.info("""
-            **3D Efficient Frontier Interpretation:**
-            - **X-axis**: Portfolio Risk (Volatility)
-            - **Y-axis**: Portfolio Return
-            - **Z-axis**: Sharpe Ratio
-            - **Color**: Sharpe Ratio (higher = better)
-            
-            The efficient frontier line shows optimal portfolios that maximize return for a given level of risk.
-            """)
+            try:
+                if 'returns_clean' in st.session_state.portfolio_data:
+                    returns = st.session_state.portfolio_data['returns_clean']
+                else:
+                    returns = st.session_state.portfolio_data['returns']
+                
+                if len(returns.columns) >= 2:
+                    # Get risk-free rate from config
+                    risk_free_rate = st.session_state.config.get('risk_free_rate', 0.045) if st.session_state.config else 0.045
+                    
+                    fig = self.viz_engine.create_3d_efficient_frontier(returns, risk_free_rate)
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    st.info("""
+                    **3D Efficient Frontier Interpretation:**
+                    - **X-axis**: Portfolio Risk (Volatility)
+                    - **Y-axis**: Portfolio Return
+                    - **Z-axis**: Sharpe Ratio
+                    - **Color**: Sharpe Ratio (higher = better)
+                    
+                    The efficient frontier line shows optimal portfolios that maximize return for a given level of risk.
+                    """)
+                else:
+                    st.warning("Need at least 2 assets for 3D efficient frontier visualization")
+            except Exception as e:
+                st.error(f"Error creating 3D efficient frontier: {str(e)}")
     
     def _render_interactive_heatmap(self):
         """Render interactive correlation heatmap."""
         if st.session_state.portfolio_data:
-            returns = st.session_state.portfolio_data['returns_clean']
-            if not returns.empty:
-                correlation_matrix = returns.corr()
+            try:
+                if 'returns_clean' in st.session_state.portfolio_data:
+                    returns = st.session_state.portfolio_data['returns_clean']
+                else:
+                    returns = st.session_state.portfolio_data['returns']
                 
-                fig = self.viz_engine.create_interactive_heatmap(correlation_matrix)
-                st.plotly_chart(fig, use_container_width=True)
-                
-                # Correlation statistics
-                st.subheader("📊 Correlation Statistics")
-                
-                # Calculate average correlation
-                mask = np.triu(np.ones_like(correlation_matrix, dtype=bool), k=1)
-                upper_tri = correlation_matrix.where(mask)
-                avg_correlation = upper_tri.stack().mean() if not upper_tri.stack().empty else 0
-                
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Average Correlation", f"{avg_correlation:.3f}")
-                with col2:
-                    min_corr = correlation_matrix.min().min() if not correlation_matrix.empty else 0
-                    st.metric("Min Correlation", f"{min_corr:.3f}")
-                with col3:
-                    max_corr = correlation_matrix.max().max() if not correlation_matrix.empty else 0
-                    st.metric("Max Correlation", f"{max_corr:.3f}")
+                if not returns.empty and len(returns.columns) >= 2:
+                    correlation_matrix = returns.corr()
+                    
+                    fig = self.viz_engine.create_interactive_heatmap(correlation_matrix)
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Correlation statistics
+                    st.subheader("📊 Correlation Statistics")
+                    
+                    # Calculate average correlation
+                    mask = np.triu(np.ones_like(correlation_matrix, dtype=bool), k=1)
+                    upper_tri = correlation_matrix.where(mask)
+                    avg_correlation = upper_tri.stack().mean() if not upper_tri.stack().empty else 0
+                    
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Average Correlation", f"{avg_correlation:.3f}")
+                    with col2:
+                        min_corr = correlation_matrix.min().min() if not correlation_matrix.empty else 0
+                        st.metric("Min Correlation", f"{min_corr:.3f}")
+                    with col3:
+                        max_corr = correlation_matrix.max().max() if not correlation_matrix.empty else 0
+                        st.metric("Max Correlation", f"{max_corr:.3f}")
+                else:
+                    st.warning("Insufficient data for correlation heatmap")
+            except Exception as e:
+                st.error(f"Error creating correlation heatmap: {str(e)}")
     
     def _render_realtime_dashboard(self):
         """Render real-time metrics dashboard."""
         if st.session_state.optimization_results:
-            metrics = st.session_state.optimization_results['metrics']
-            
-            fig = self.viz_engine.create_real_time_metrics_dashboard(metrics)
-            st.plotly_chart(fig, use_container_width=True)
+            try:
+                metrics = st.session_state.optimization_results['metrics']
+                
+                fig = self.viz_engine.create_real_time_metrics_dashboard(metrics)
+                st.plotly_chart(fig, use_container_width=True)
+            except Exception as e:
+                st.error(f"Error creating real-time dashboard: {str(e)}")
     
     def _reset_analysis(self):
         """Reset the analysis."""
@@ -4276,6 +4556,7 @@ class QuantEdgeProEnhanced:
         st.session_state.data_fetched = False
         st.session_state.analysis_running = False
         st.session_state.config = None
+        st.session_state.last_fetch_time = None
     
     def run(self):
         """Main application runner."""
@@ -4307,6 +4588,9 @@ class QuantEdgeProEnhanced:
                     border-color: #00cc96;
                     box-shadow: 0 8px 32px rgba(0, 204, 150, 0.2);
                 }
+                .stProgress > div > div > div > div {
+                    background: linear-gradient(90deg, #00cc96, #636efa);
+                }
             </style>
             """, unsafe_allow_html=True)
             
@@ -4335,15 +4619,22 @@ class QuantEdgeProEnhanced:
                 # Show data preview
                 if st.session_state.portfolio_data:
                     with st.expander("📊 Data Preview", expanded=True):
-                        returns = st.session_state.portfolio_data['returns']
-                        st.write(f"**Assets:** {len(returns.columns)}")
-                        st.write(f"**Date Range:** {returns.index[0].date()} to {returns.index[-1].date()}")
-                        st.write(f"**Total Returns:** {len(returns)}")
-                        
-                        # Show correlation heatmap
-                        if not returns.empty:
-                            fig = self.viz_engine.create_interactive_heatmap(returns.corr())
-                            st.plotly_chart(fig, use_container_width=True)
+                        if 'returns' in st.session_state.portfolio_data:
+                            returns = st.session_state.portfolio_data['returns']
+                            st.write(f"**Assets:** {len(returns.columns)}")
+                            if len(returns) > 0:
+                                st.write(f"**Date Range:** {returns.index[0].date()} to {returns.index[-1].date()}")
+                            st.write(f"**Total Returns:** {len(returns)}")
+                            
+                            # Show correlation heatmap
+                            if not returns.empty and len(returns.columns) >= 2:
+                                try:
+                                    fig = self.viz_engine.create_interactive_heatmap(returns.corr())
+                                    st.plotly_chart(fig, use_container_width=True)
+                                except Exception as e:
+                                    st.warning(f"Could not create correlation heatmap: {str(e)}")
+                        else:
+                            st.warning("No return data available")
             
             # Render results if analysis is complete
             if st.session_state.analysis_complete:
@@ -4372,7 +4663,7 @@ class QuantEdgeProEnhanced:
                 if st.button("📊 Performance Report", use_container_width=True, key="perf_report"):
                     report = performance_monitor.get_performance_report()
                     with st.expander("Performance Report", expanded=True):
-                        st.json(report)
+                        st.json(report, expanded=False)
             
             # Footer
             st.markdown("---")
@@ -4380,7 +4671,6 @@ class QuantEdgeProEnhanced:
             <div style="text-align: center; color: #94a3b8; font-size: 0.9rem; padding: 2rem 0;">
                 <p>⚡ <strong>QuantEdge Pro v4.0 Enhanced</strong> | Advanced Portfolio Analytics Platform</p>
                 <p>🎯 Production-Grade Analytics • 5500+ Lines of Code • Enterprise Ready</p>
-                <p>📧 Contact: support@quantedge.pro | 📞 +1 (555) 123-4567</p>
                 <p style="margin-top: 1rem; font-size: 0.8rem; color: #636efa;">
                     © 2024 QuantEdge Technologies. All rights reserved.
                 </p>
@@ -4431,6 +4721,7 @@ def main():
             #MainMenu {visibility: hidden;}
             footer {visibility: hidden;}
             header {visibility: hidden;}
+            .stDeployButton {display: none;}
             </style>
         """
         st.markdown(hide_streamlit_style, unsafe_allow_html=True)
