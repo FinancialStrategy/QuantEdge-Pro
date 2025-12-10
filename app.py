@@ -1,6 +1,6 @@
 # ============================================================================
 # QUANTEDGE MK | INSTITUTIONAL PORTFOLIO TERMINAL (ADVANCED MONOLITHIC VERSION)
-# Version: v3.1 Pro Plus (AI + Advanced Risk + Stress Testing + Reporting Integrated)
+# Version: v3.2 Pro Plus (AI + Advanced Risk + Stress Testing + Reporting Integrated)
 # Production Level | Institutional Class
 # ============================================================================
 
@@ -74,6 +74,8 @@ LIBRARIES = LibraryManager.check_libraries()
 
 warnings.filterwarnings('ignore')
 
+TRADING_DAYS_PER_YEAR = 252
+
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
     page_title="QuantEdge Pro | Institutional Portfolio Management",
@@ -83,7 +85,7 @@ st.set_page_config(
     menu_items={
         'Get Help': 'https://quantedge.pro',
         'Report a bug': 'https://github.com/quantedge/issues',
-        'About': "QuantEdge Pro v3.1 - Institutional Portfolio Analysis Platform"
+        'About': "QuantEdge Pro v3.2 - Institutional Portfolio Analysis Platform"
     }
 )
 
@@ -283,7 +285,15 @@ class PortfolioDataManagerPro:
                              start_date: datetime, end_date: datetime) -> Tuple[pd.DataFrame, pd.Series]:
         all_tickers = list(set(tickers + [benchmark]))
         try:
-            data = yf.download(all_tickers, start=start_date, end=end_date, progress=False, group_by='ticker', threads=True, auto_adjust=True)
+            data = yf.download(
+                all_tickers,
+                start=start_date,
+                end=end_date,
+                progress=False,
+                group_by='ticker',
+                threads=True,
+                auto_adjust=True
+            )
             prices = pd.DataFrame()
             benchmark_prices = pd.Series(dtype=float)
             
@@ -292,25 +302,36 @@ class PortfolioDataManagerPro:
                     try:
                         df = data.xs(ticker, axis=1, level=0, drop_level=True)
                         if 'Close' in df.columns:
-                            if ticker == benchmark: benchmark_prices = df['Close']
-                            elif ticker in tickers: prices[ticker] = df['Close']
-                    except KeyError: continue
+                            if ticker == benchmark:
+                                benchmark_prices = df['Close']
+                            elif ticker in tickers:
+                                prices[ticker] = df['Close']
+                    except KeyError:
+                        continue
             else:
                 if 'Close' in data.columns:
                     if len(all_tickers) == 1:
-                        if all_tickers[0] == benchmark: benchmark_prices = data['Close']
-                        else: prices[all_tickers[0]] = data['Close']
+                        if all_tickers[0] == benchmark:
+                            benchmark_prices = data['Close']
+                        else:
+                            prices[all_tickers[0]] = data['Close']
             
             prices = prices.ffill().bfill()
             benchmark_prices = benchmark_prices.ffill().bfill()
             
             common_idx = prices.index.intersection(benchmark_prices.index)
-            if len(common_idx) == 0: raise ValueError("Portfolio and benchmark dates do not overlap")
+            if len(common_idx) == 0:
+                raise ValueError("Portfolio and benchmark dates do not overlap")
             return prices.loc[common_idx], benchmark_prices.loc[common_idx]
         except Exception as e:
             raise Exception(f"Data fetch error: {str(e)}")
     
-    def calculate_returns(self, prices: pd.DataFrame, benchmark_prices: pd.Series, method: str = 'log') -> Tuple[pd.DataFrame, pd.Series]:
+    def calculate_returns(
+        self,
+        prices: pd.DataFrame,
+        benchmark_prices: pd.Series,
+        method: str = 'log'
+    ) -> Tuple[pd.DataFrame, pd.Series]:
         if method == 'log':
             portfolio_returns = np.log(prices / prices.shift(1)).dropna()
             benchmark_returns = np.log(benchmark_prices / benchmark_prices.shift(1)).dropna()
@@ -333,91 +354,133 @@ class AdvancedPortfolioOptimizerPro:
             try:
                 self.mu = expected_returns.mean_historical_return(prices)
                 self.S = risk_models.sample_cov(prices)
-            except Exception: self.mu = None; self.S = None
+            except Exception:
+                self.mu = None
+                self.S = None
+        else:
+            self.mu = None
+            self.S = None
 
     def optimize(self, method: str, config: PortfolioConfig) -> Tuple[Dict, Tuple]:
         methods = {
-            'MAX_SHARPE': self._optimize_max_sharpe, 'MIN_VOLATILITY': self._optimize_min_volatility,
-            'RISK_PARITY': self._optimize_risk_parity, 'MAX_DIVERSIFICATION': self._optimize_max_diversification,
-            'HRP': self._optimize_hrp, 'EQUAL_WEIGHT': self._optimize_equal_weight,
+            'MAX_SHARPE': self._optimize_max_sharpe,
+            'MIN_VOLATILITY': self._optimize_min_volatility,
+            'RISK_PARITY': self._optimize_risk_parity,
+            'MAX_DIVERSIFICATION': self._optimize_max_diversification,
+            'HRP': self._optimize_hrp,
+            'EQUAL_WEIGHT': self._optimize_equal_weight,
             'MEAN_VARIANCE': self._optimize_mean_variance
         }
-        try: return methods.get(method, self._optimize_equal_weight)(config)
+        try:
+            return methods.get(method, self._optimize_equal_weight)(config)
         except Exception as e:
             self.logger.error(f"{method} failed: {e}")
             return self._optimize_equal_weight(config)
 
     def _optimize_max_sharpe(self, config: PortfolioConfig) -> Tuple[Dict, Tuple]:
-        if not LIBRARIES.get('pypfopt', False) or self.mu is None: return self._optimize_equal_weight(config)
+        if not LIBRARIES.get('pypfopt', False) or self.mu is None or self.S is None:
+            return self._optimize_equal_weight(config)
         try:
             ef = EfficientFrontier(self.mu, self.S)
-            weights = ef.max_sharpe(risk_free_rate=config.risk_free_rate)
+            _ = ef.max_sharpe(risk_free_rate=config.risk_free_rate)
             return ef.clean_weights(), ef.portfolio_performance(verbose=False, risk_free_rate=config.risk_free_rate)
-        except Exception: return self._optimize_equal_weight(config)
+        except Exception:
+            return self._optimize_equal_weight(config)
 
     def _optimize_min_volatility(self, config: PortfolioConfig) -> Tuple[Dict, Tuple]:
-        if not LIBRARIES.get('pypfopt', False): return self._optimize_equal_weight(config)
+        if not LIBRARIES.get('pypfopt', False) or self.mu is None or self.S is None:
+            return self._optimize_equal_weight(config)
         try:
             ef = EfficientFrontier(self.mu, self.S)
-            weights = ef.min_volatility()
+            _ = ef.min_volatility()
             return ef.clean_weights(), ef.portfolio_performance(verbose=False, risk_free_rate=config.risk_free_rate)
-        except Exception: return self._optimize_equal_weight(config)
+        except Exception:
+            return self._optimize_equal_weight(config)
 
     def _optimize_risk_parity(self, config: PortfolioConfig) -> Tuple[Dict, Tuple]:
         try:
-            vol = self.returns.std() * np.sqrt(252)
+            vol = self.returns.std() * np.sqrt(TRADING_DAYS_PER_YEAR)
             inv_vol = 1 / vol.replace(0, np.inf)
             weights = (inv_vol / inv_vol.sum()).to_dict()
             return weights, self._calculate_performance(weights, config.risk_free_rate)
-        except Exception: return self._optimize_equal_weight(config)
+        except Exception:
+            return self._optimize_equal_weight(config)
 
     def _optimize_max_diversification(self, config: PortfolioConfig) -> Tuple[Dict, Tuple]:
-        return self._optimize_equal_weight(config) # Placeholder logic
+        # Placeholder logic; can be upgraded to true maximum diversification ratio optimization.
+        return self._optimize_equal_weight(config)
 
     def _optimize_hrp(self, config: PortfolioConfig) -> Tuple[Dict, Tuple]:
-        if not LIBRARIES.get('pypfopt', False): return self._optimize_equal_weight(config)
+        if not LIBRARIES.get('pypfopt', False):
+            return self._optimize_equal_weight(config)
         try:
             hrp = HRPOpt(self.returns)
             weights = hrp.optimize()
             return weights, self._calculate_performance(weights, config.risk_free_rate)
-        except Exception: return self._optimize_equal_weight(config)
+        except Exception:
+            return self._optimize_equal_weight(config)
 
     def _optimize_equal_weight(self, config: PortfolioConfig) -> Tuple[Dict, Tuple]:
         n = len(self.returns.columns)
-        weights = {t: 1.0/n for t in self.returns.columns}
+        if n == 0:
+            return {}, (0.0, 0.0, 0.0)
+        weights = {t: 1.0 / n for t in self.returns.columns}
         return weights, self._calculate_performance(weights, config.risk_free_rate)
 
     def _optimize_mean_variance(self, config: PortfolioConfig) -> Tuple[Dict, Tuple]:
         try:
-            mu = self.returns.mean() * 252
-            S = self.returns.cov() * 252
+            mu = self.returns.mean() * TRADING_DAYS_PER_YEAR
+            S = self.returns.cov() * TRADING_DAYS_PER_YEAR
             n = len(mu)
+            if n == 0:
+                return {}, (0.0, 0.0, 0.0)
             bounds = [(0, 1) for _ in range(n)]
             constraints = [{'type': 'eq', 'fun': lambda w: np.sum(w) - 1}]
             
-            # Constraints Logic Fix
+            # Sector constraints
             if config.constraints and 'sector_limits' in config.constraints:
                 local_classifier = EnhancedAssetClassifierPro()
                 for sector, (min_w, max_w) in config.constraints['sector_limits'].items():
-                    idx = [i for i, t in enumerate(self.returns.columns) if local_classifier._get_sector_from_constants(t) == sector]
+                    idx = [i for i, t in enumerate(self.returns.columns)
+                           if local_classifier._get_sector_from_constants(t) == sector]
                     if idx:
-                        constraints.append({'type': 'ineq', 'fun': lambda w, i=idx, m=min_w: np.sum(w[i]) - m})
-                        constraints.append({'type': 'ineq', 'fun': lambda w, i=idx, m=max_w: m - np.sum(w[i])})
+                        constraints.append({'type': 'ineq',
+                                            'fun': lambda w, i=idx, m=min_w: np.sum(w[i]) - m})
+                        constraints.append({'type': 'ineq',
+                                            'fun': lambda w, i=idx, m=max_w: m - np.sum(w[i])})
 
             import scipy.optimize as opt
-            res = opt.minimize(lambda w: -(np.dot(w, mu) / np.sqrt(w.T @ S @ w)), np.ones(n)/n, bounds=bounds, constraints=constraints, method='SLSQP')
+            def neg_sharpe(w, mu_vec, cov_mat, rf):
+                port_ret = np.dot(w, mu_vec)
+                port_vol = np.sqrt(np.dot(w.T, np.dot(cov_mat, w)))
+                if port_vol == 0:
+                    return 0
+                return -(port_ret - rf) / port_vol
+
+            res = opt.minimize(
+                neg_sharpe,
+                np.ones(n) / n,
+                args=(mu.values, S.values, config.risk_free_rate),
+                bounds=bounds,
+                constraints=constraints,
+                method='SLSQP'
+            )
             if res.success:
-                weights = dict(zip(self.returns.columns, res.x / res.x.sum()))
+                w_clean = res.x / res.x.sum()
+                weights = dict(zip(self.returns.columns, w_clean))
                 return weights, self._calculate_performance(weights, config.risk_free_rate)
             raise ValueError("Optimization failed")
-        except Exception: return self._optimize_equal_weight(config)
+        except Exception:
+            return self._optimize_equal_weight(config)
 
     def _calculate_performance(self, weights: Dict, risk_free_rate: float) -> Tuple:
+        if self.returns.empty:
+            return (0.0, 0.0, 0.0)
         w = np.array([weights.get(t, 0) for t in self.returns.columns])
         port_ret = self.returns.dot(w)
-        ann_ret = port_ret.mean() * 252
-        ann_vol = port_ret.std() * np.sqrt(252)
-        sharpe = (ann_ret - risk_free_rate) / ann_vol if ann_vol > 0 else 0
+        ann_ret = port_ret.mean() * TRADING_DAYS_PER_YEAR
+        ann_vol = port_ret.std() * np.sqrt(TRADING_DAYS_PER_YEAR)
+        sharpe = (ann_ret - risk_free_rate) / ann_vol if ann_vol > 0 else 0.0
         return (ann_ret, ann_vol, sharpe)
 
 # ============================================================================
@@ -428,76 +491,139 @@ class AdvancedRiskAnalyzerPro:
     def __init__(self, logger=None):
         self.logger = logger or logging.getLogger(__name__)
 
-    def calculate_comprehensive_metrics(self, portfolio_returns: pd.Series, 
-                                        benchmark_returns: Optional[pd.Series] = None,
-                                        risk_free_rate: float = 0.045) -> Dict:
+    def calculate_comprehensive_metrics(
+        self,
+        portfolio_returns: pd.Series,
+        benchmark_returns: Optional[pd.Series] = None,
+        risk_free_rate: float = 0.045
+    ) -> Dict:
         """Calculate comprehensive risk metrics with English keys."""
-        metrics = {}
+        metrics: Dict[str, float] = {}
         try:
-            metrics['Total Return'] = (1 + portfolio_returns).prod() - 1
-            metrics['Annual Return'] = portfolio_returns.mean() * 252
-            metrics['Annual Volatility'] = portfolio_returns.std() * np.sqrt(252)
-            metrics['Sharpe Ratio'] = (metrics['Annual Return'] - risk_free_rate) / metrics['Annual Volatility'] if metrics['Annual Volatility'] > 0 else 0
-            
-            downside = portfolio_returns[portfolio_returns < 0]
-            down_std = downside.std() * np.sqrt(252) if len(downside) > 0 else 0
-            metrics['Sortino Ratio'] = (metrics['Annual Return'] - risk_free_rate) / down_std if down_std > 0 else 0
-            
-            cum = (1 + portfolio_returns).cumprod()
-            drawdown = (cum - cum.expanding().max()) / cum.expanding().max()
-            metrics['Max Drawdown'] = drawdown.min()
-            metrics['Max Drawdown Duration'] = self._calculate_max_drawdown_duration(drawdown)
-            
-            metrics['VaR 95%'] = np.percentile(portfolio_returns, 5)
-            metrics['CVaR 95%'] = portfolio_returns[portfolio_returns <= metrics['VaR 95%']].mean()
-            
-            if len(portfolio_returns) > 20:
-                try:
-                    from scipy import stats
-                    jb = stats.jarque_bera(portfolio_returns)
-                    metrics['Jarque-Bera Stat'] = getattr(jb, 'statistic', jb[0])
-                except Exception: metrics['Jarque-Bera Stat'] = 0
-            
-            metrics['Benchmark Annual Return'] = benchmark_returns.mean() * 252 if benchmark_returns is not None else 0.0
-            metrics['Risk Category'] = self._determine_risk_category(metrics['Annual Volatility'], metrics['Max Drawdown'])
-            
-            return metrics
+            pr = portfolio_returns.dropna()
+            if pr.empty:
+                return metrics
+
+            total_ret = (1 + pr).prod() - 1
+            ann_ret = pr.mean() * TRADING_DAYS_PER_YEAR
+            ann_vol = pr.std() * np.sqrt(TRADING_DAYS_PER_YEAR)
+            sharpe = (ann_ret - risk_free_rate) / ann_vol if ann_vol > 0 else 0.0
+
+            downside = pr[pr < 0]
+            down_std = downside.std() * np.sqrt(TRADING_DAYS_PER_YEAR) if len(downside) > 0 else 0.0
+            sortino = (ann_ret - risk_free_rate) / down_std if down_std > 0 else 0.0
+
+            cum = (1 + pr).cumprod()
+            running_max = cum.cummax()
+            drawdown = (cum - running_max) / running_max
+            max_dd = drawdown.min()
+            max_dd_duration = self._calculate_max_drawdown_duration(drawdown)
+
+            var_95 = np.percentile(pr, 5)
+            cvar_95 = pr[pr <= var_95].mean() if (pr <= var_95).any() else np.nan
+
+            metrics['Total Return'] = float(total_ret)
+            metrics['Annual Return'] = float(ann_ret)
+            metrics['Annual Volatility'] = float(ann_vol)
+            metrics['Sharpe Ratio'] = float(sharpe)
+            metrics['Sortino Ratio'] = float(sortino)
+            metrics['Max Drawdown'] = float(max_dd)
+            metrics['Max Drawdown Duration'] = int(max_dd_duration)
+            metrics['VaR 95%'] = float(var_95)
+            metrics['CVaR 95%'] = float(cvar_95) if not np.isnan(cvar_95) else np.nan
+
+            # Benchmark annual return (geometric)
+            bench_ann_ret = 0.0
+            if benchmark_returns is not None:
+                br = benchmark_returns.dropna()
+                if not br.empty:
+                    bench_total = (1 + br).prod()
+                    n_days = len(br)
+                    bench_ann_ret = bench_total ** (TRADING_DAYS_PER_YEAR / n_days) - 1
+            metrics['Benchmark Annual Return'] = float(bench_ann_ret)
+
+            metrics['Risk Category'] = self._determine_risk_category(
+                metrics['Annual Volatility'],
+                metrics['Max Drawdown']
+            )
+
         except Exception as e:
             self.logger.error(f"Metric error: {e}")
             return metrics
 
+        # Separate Jarque–Bera block for robustness
+        if len(portfolio_returns) > 20:
+            try:
+                from scipy import stats
+                jb_result = stats.jarque_bera(portfolio_returns.dropna())
+                # SciPy may return a result object or tuple
+                stat = getattr(jb_result, 'statistic', None)
+                pvalue = getattr(jb_result, 'pvalue', None)
+                if stat is None and isinstance(jb_result, (list, tuple, np.ndarray)) and len(jb_result) >= 2:
+                    stat, pvalue = jb_result[0], jb_result[1]
+                metrics['Jarque-Bera Stat'] = float(stat) if stat is not None else np.nan
+                metrics['Jarque-Bera p-value'] = float(pvalue) if pvalue is not None else np.nan
+            except Exception:
+                metrics['Jarque-Bera Stat'] = np.nan
+                metrics['Jarque-Bera p-value'] = np.nan
+
+        return metrics
+
     def _calculate_max_drawdown_duration(self, drawdown: pd.Series) -> int:
-        if drawdown.empty: return 0
-        in_dd = drawdown < 0
-        return drawdown.groupby((in_dd != in_dd.shift()).cumsum()).size().max() if in_dd.any() else 0
+        if drawdown.empty:
+            return 0
+        in_drawdown = drawdown < 0
+        max_len = 0
+        current_len = 0
+        for flag in in_drawdown:
+            if flag:
+                current_len += 1
+                max_len = max(max_len, current_len)
+            else:
+                current_len = 0
+        return max_len
 
     def _determine_risk_category(self, vol: float, mdd: float) -> str:
-        for lvl, p in Constants.RISK_LEVELS.items():
-            if vol <= p['max_volatility'] and abs(mdd) <= abs(p['max_drawdown']): return lvl
+        for lvl, params in Constants.RISK_LEVELS.items():
+            if vol <= params['max_volatility'] and abs(mdd) <= abs(params['max_drawdown']):
+                return lvl
         return 'VERY AGGRESSIVE'
 
     def calculate_component_var(self, returns: pd.DataFrame, weights: Dict) -> pd.Series:
         try:
+            if returns.empty:
+                return pd.Series(0.0, index=[])
             w = np.array([weights.get(t, 0) for t in returns.columns])
-            cov = returns.cov() * 252
-            vol = np.sqrt(np.dot(w.T, np.dot(cov, w)))
-            return pd.Series(w * (np.dot(cov, w) / vol * 2.33), index=returns.columns)
-        except Exception: return pd.Series(0, index=returns.columns)
+            cov = returns.cov() * TRADING_DAYS_PER_YEAR
+            port_vol = np.sqrt(np.dot(w.T, np.dot(cov, w)))
+            if port_vol == 0:
+                return pd.Series(0.0, index=returns.columns)
+            # 95% param VaR approximation
+            z_score = 1.65
+            marginal_contrib = np.dot(cov, w) / port_vol
+            component_var = w * marginal_contrib * z_score
+            return pd.Series(component_var, index=returns.columns)
+        except Exception:
+            return pd.Series(0.0, index=returns.columns)
 
     def perform_garch_analysis(self, returns: pd.Series):
-        if not LIBRARIES.get('arch', False): return None, None
+        if not LIBRARIES.get('arch', False):
+            return None, None
         try:
             res = arch.arch_model(returns * 100, vol='Garch', p=1, q=1).fit(disp='off', show_warning=False)
             return res, {'conditional_volatility': res.conditional_volatility / 100}
-        except Exception: return None, None
+        except Exception:
+            return None, None
 
     def perform_pca_analysis(self, returns: pd.DataFrame):
-        if not LIBRARIES.get('sklearn', False): return None
+        if not LIBRARIES.get('sklearn', False):
+            return None
         try:
             pca = PCA(n_components=min(5, len(returns.columns)))
             pca.fit(returns.corr())
             return {'explained_variance': pca.explained_variance_ratio_}
-        except Exception: return None
+        except Exception:
+            return None
 
 # ============================================================================
 # 4. ADVANCED PERFORMANCE ATTRIBUTION
@@ -507,45 +633,114 @@ class EnhancedPerformanceAttributionPro:
     def __init__(self, logger=None):
         self.logger = logger or logging.getLogger(__name__)
 
-    def calculate_brinson_fachler(self, asset_returns: pd.DataFrame, benchmark_returns: Optional[pd.Series],
-                                  portfolio_weights: Dict, benchmark_weights: Dict, sector_map: Dict) -> Dict:
+    def calculate_brinson_fachler(
+        self,
+        asset_returns: pd.DataFrame,
+        benchmark_returns: Optional[pd.Series],
+        portfolio_weights: Dict,
+        benchmark_weights: Dict,
+        sector_map: Dict
+    ) -> Dict:
         """Brinson-Fachler logic using full asset returns DataFrame."""
         try:
-            port_w = pd.Series(portfolio_weights).reindex(asset_returns.columns).fillna(0)
-            bench_w = pd.Series(benchmark_weights).reindex(asset_returns.columns).fillna(0)
-            
+            if asset_returns.empty:
+                return {'allocation': 0.0, 'selection': 0.0, 'interaction': 0.0,
+                        'sector_breakdown': {}, 'total_excess': 0.0}
+
+            port_w = pd.Series(portfolio_weights).reindex(asset_returns.columns).fillna(0.0)
+            bench_w = pd.Series(benchmark_weights).reindex(asset_returns.columns).fillna(0.0)
+
+            # Normalize to 1
+            if port_w.sum() != 0:
+                port_w = port_w / port_w.sum()
+            if bench_w.sum() != 0:
+                bench_w = bench_w / bench_w.sum()
+
+            # Portfolio and benchmark total returns for evaluation horizon
             port_total = (1 + asset_returns.dot(port_w)).prod() - 1
-            bench_total = (1 + benchmark_returns).prod() - 1 if benchmark_returns is not None else (1 + asset_returns.dot(bench_w)).prod() - 1
-            
-            results = {'allocation': 0.0, 'selection': 0.0, 'interaction': 0.0, 'sector_breakdown': {}, 'total_excess': port_total - bench_total}
-            
-            for sector in set(sector_map.values()):
-                s_assets = [t for t, s in sector_map.items() if s == sector and t in asset_returns.columns]
-                if not s_assets: continue
-                
-                wp, wb = port_w[s_assets].sum(), bench_w[s_assets].sum()
-                rp = (1 + asset_returns[s_assets].dot(port_w[s_assets]/wp)).prod() - 1 if wp > 0 else 0
-                rb = (1 + asset_returns[s_assets].dot(bench_w[s_assets]/wb)).prod() - 1 if wb > 0 else 0
-                
-                allo = (wp - wb) * (rb - bench_total)
-                sel = wb * (rp - rb)
-                inter = (wp - wb) * (rp - rb)
-                
-                results['allocation'] += allo; results['selection'] += sel; results['interaction'] += inter
-                results['sector_breakdown'][sector] = {'allocation': allo, 'selection': sel, 'interaction': inter, 'total': allo+sel+inter}
+            if benchmark_returns is not None:
+                bench_total = (1 + benchmark_returns).prod() - 1
+            else:
+                bench_total = (1 + asset_returns.dot(bench_w)).prod() - 1
+
+            results = {
+                'allocation': 0.0,
+                'selection': 0.0,
+                'interaction': 0.0,
+                'sector_breakdown': {},
+                'total_excess': float(port_total - bench_total),
+            }
+
+            unique_sectors = set(sector_map.values())
+            for sector in unique_sectors:
+                sector_assets = [t for t, s in sector_map.items()
+                                 if s == sector and t in asset_returns.columns]
+                if not sector_assets:
+                    continue
+
+                wp = port_w[sector_assets].sum()
+                wb = bench_w[sector_assets].sum()
+
+                # Sector portfolio and benchmark returns
+                rp = 0.0
+                rb = 0.0
+                if wp > 0:
+                    rp = (1 + asset_returns[sector_assets]
+                          .dot(port_w[sector_assets] / wp)).prod() - 1
+                if wb > 0:
+                    rb = (1 + asset_returns[sector_assets]
+                          .dot(bench_w[sector_assets] / wb)).prod() - 1
+
+                allocation = (wp - wb) * (rb - bench_total)
+                selection = wb * (rp - rb)
+                interaction = (wp - wb) * (rp - rb)
+
+                results['allocation'] += allocation
+                results['selection'] += selection
+                results['interaction'] += interaction
+                results['sector_breakdown'][sector] = {
+                    'allocation': float(allocation),
+                    'selection': float(selection),
+                    'interaction': float(interaction),
+                    'total': float(allocation + selection + interaction),
+                }
+
             return results
         except Exception as e:
             self.logger.error(f"Attribution error: {e}")
-            return {'allocation': 0, 'selection': 0, 'interaction': 0, 'sector_breakdown': {}, 'total_excess': 0}
+            return {
+                'allocation': 0.0,
+                'selection': 0.0,
+                'interaction': 0.0,
+                'sector_breakdown': {},
+                'total_excess': 0.0,
+            }
 
     def calculate_rolling_attribution(self, port: pd.Series, bench: pd.Series) -> pd.DataFrame:
         try:
-            return pd.DataFrame({'Rolling Excess': (port - bench).rolling(63).mean() * 252})
-        except Exception: return pd.DataFrame()
+            return pd.DataFrame(
+                {'Rolling Excess': (port - bench).rolling(63).mean() * TRADING_DAYS_PER_YEAR}
+            )
+        except Exception:
+            return pd.DataFrame()
 
 # ============================================================================
 # 5. ADVANCED BACKTESTING
 # ============================================================================
+
+def map_rebalancing_frequency(freq_label: str) -> Optional[str]:
+    """
+    Map UI rebalancing frequency label to pandas offset alias.
+    Supports English labels; can be extended for others.
+    """
+    mapping = {
+        "Daily": "D",
+        "Weekly": "W",
+        "Monthly": "M",
+        "Quarterly": "Q",
+        "Yearly": "A",
+    }
+    return mapping.get(freq_label, "M")
 
 class PortfolioBacktesterPro:
     def __init__(self, returns: pd.DataFrame):
@@ -553,13 +748,90 @@ class PortfolioBacktesterPro:
 
     def run_backtest(self, config: Dict) -> Dict:
         strategy = config.get('type', 'BUY_HOLD')
-        if strategy == 'BUY_HOLD': return self._run_buy_hold(config)
-        return self._run_buy_hold(config) # Placeholder for other strats
+        if strategy == 'BUY_HOLD':
+            return self._run_buy_hold(config)
+        elif strategy == 'REBALANCE_FIXED':
+            return self._run_rebalance_fixed(config)
+        else:
+            return self._run_buy_hold(config)
 
     def _run_buy_hold(self, config: Dict) -> Dict:
-        weights = pd.Series(config['initial_weights']).reindex(self.returns.columns).fillna(0)
+        if self.returns.empty:
+            return {
+                'portfolio_value': pd.Series(dtype=float),
+                'portfolio_returns': pd.Series(dtype=float),
+                'strategy': 'BUY_HOLD'
+            }
+        weights = pd.Series(config['initial_weights']).reindex(self.returns.columns).fillna(0.0)
         port_ret = self.returns.dot(weights)
-        return {'portfolio_value': (1 + port_ret).cumprod(), 'portfolio_returns': port_ret, 'strategy': 'BUY_HOLD'}
+        port_val = (1 + port_ret).cumprod()
+        return {
+            'portfolio_value': port_val,
+            'portfolio_returns': port_ret,
+            'strategy': 'BUY_HOLD'
+        }
+
+    def _run_rebalance_fixed(self, config: Dict) -> Dict:
+        if self.returns.empty:
+            return {
+                'portfolio_value': pd.Series(dtype=float),
+                'portfolio_returns': pd.Series(dtype=float),
+                'strategy': 'REBALANCE_FIXED'
+            }
+        freq = config.get('rebalancing_frequency', 'M')
+        target_weights = pd.Series(config['initial_weights']).reindex(self.returns.columns).fillna(0.0)
+        target_weights = target_weights / target_weights.sum() if target_weights.sum() != 0 else target_weights
+
+        dates = self.returns.index
+        if len(dates) == 0:
+            return {
+                'portfolio_value': pd.Series(dtype=float),
+                'portfolio_returns': pd.Series(dtype=float),
+                'strategy': 'REBALANCE_FIXED'
+            }
+
+        # Determine rebalancing dates
+        try:
+            rebalance_dates = set(self.returns.resample(freq).first().index)
+        except Exception:
+            rebalance_dates = set()
+
+        # Always rebalance at the first date
+        rebalance_dates.add(dates[0])
+
+        portfolio_values = []
+        portfolio_returns = []
+
+        # Start with target weights
+        current_weights = target_weights.copy()
+        portfolio_value = 1.0
+
+        for dt in dates:
+            if dt in rebalance_dates:
+                # Rebalance to target weights
+                current_weights = target_weights.copy()
+
+            r_t = self.returns.loc[dt]
+            daily_port_ret = float(np.dot(current_weights.values, r_t.values))
+            portfolio_value *= (1.0 + daily_port_ret)
+
+            portfolio_values.append(portfolio_value)
+            portfolio_returns.append(daily_port_ret)
+
+            # Update weights after market move
+            asset_values = current_weights.values * (1.0 + r_t.values)
+            total_value = asset_values.sum()
+            if total_value > 0:
+                current_weights = pd.Series(asset_values / total_value, index=current_weights.index)
+
+        port_val_series = pd.Series(portfolio_values, index=dates)
+        port_ret_series = pd.Series(portfolio_returns, index=dates)
+
+        return {
+            'portfolio_value': port_val_series,
+            'portfolio_returns': port_ret_series,
+            'strategy': 'REBALANCE_FIXED'
+        }
 
 # ============================================================================
 # 6. SCENARIO STRESS TESTING (NEW)
@@ -571,54 +843,77 @@ class ScenarioStressTester:
         self.dm = data_manager
         self.logger = logger or logging.getLogger(__name__)
 
-    def run_stress_test(self, scenarios: List[str], weights: Dict[str, float], benchmark_ticker: str) -> Dict[str, Dict]:
-        results = {}
+    def run_stress_test(
+        self,
+        scenarios: List[str],
+        weights: Dict[str, float],
+        benchmark_ticker: str
+    ) -> Dict[str, Dict]:
+        results: Dict[str, Dict] = {}
         tickers = list(weights.keys())
         
         for scenario_name in scenarios:
-            if scenario_name not in Constants.HISTORICAL_CRISES: continue
+            if scenario_name not in Constants.HISTORICAL_CRISES:
+                continue
             start_str, end_str = Constants.HISTORICAL_CRISES[scenario_name]
             
             try:
-                start, end = datetime.strptime(start_str, '%Y-%m-%d'), datetime.strptime(end_str, '%Y-%m-%d')
+                start = datetime.strptime(start_str, '%Y-%m-%d')
+                end = datetime.strptime(end_str, '%Y-%m-%d')
                 prices, bench_prices = self.dm.fetch_portfolio_data(tickers, benchmark_ticker, start, end)
-                if prices.empty: 
+                if prices.empty:
                     results[scenario_name] = {'error': 'No data'}
                     continue
                 returns, bench_returns = self.dm.calculate_returns(prices, bench_prices)
                 
                 # Dynamic Renormalization
-                avail_assets = [t for t in tickers if t in returns.columns]
-                orig_coverage = sum(weights[t] for t in avail_assets)
+                available_assets = [t for t in tickers if t in returns.columns]
+                original_coverage = sum(weights[t] for t in available_assets)
                 
-                if orig_coverage < 0.4:
-                    results[scenario_name] = {'error': f"Insufficient coverage ({orig_coverage:.0%})"}
+                if original_coverage < 0.4:
+                    results[scenario_name] = {
+                        'error': f"Insufficient coverage ({original_coverage:.0%})"
+                    }
                     continue
                 
-                norm_weights = np.array([weights[t] for t in avail_assets]) / orig_coverage
-                scen_ret = returns[avail_assets].dot(norm_weights)
-                cum_port = (1 + scen_ret).cumprod()
+                normalized_weights = np.array([weights[t] for t in available_assets]) / original_coverage
+                scenario_returns = returns[available_assets].dot(normalized_weights)
+                cumulative_portfolio = (1 + scenario_returns).cumprod()
+                cumulative_benchmark = (1 + bench_returns).cumprod()
+
+                max_dd = ((cumulative_portfolio - cumulative_portfolio.expanding().max())
+                          / cumulative_portfolio.expanding().max()).min()
                 
                 results[scenario_name] = {
-                    'portfolio_return': cum_port.iloc[-1] - 1,
+                    'portfolio_return': cumulative_portfolio.iloc[-1] - 1,
                     'benchmark_return': (1 + bench_returns).prod() - 1,
-                    'max_drawdown': ((cum_port - cum_port.expanding().max()) / cum_port.expanding().max()).min(),
-                    'coverage': orig_coverage,
-                    'surviving_assets': len(avail_assets),
-                    'cumulative_series': cum_port,
-                    'benchmark_series': (1 + bench_returns).cumprod()
+                    'max_drawdown': float(max_dd),
+                    'coverage': float(original_coverage),
+                    'surviving_assets': len(available_assets),
+                    'cumulative_series': cumulative_portfolio,
+                    'benchmark_series': cumulative_benchmark
                 }
             except Exception as e:
                 results[scenario_name] = {'error': str(e)}
         return results
 
-    def simulate_hypothetical_shocks(self, current_value: float, weights: Dict, betas: Dict[str, float]) -> pd.DataFrame:
+    def simulate_hypothetical_shocks(
+        self,
+        current_value: float,
+        weights: Dict,
+        betas: Dict[str, float]
+    ) -> pd.DataFrame:
         shocks = [-0.30, -0.20, -0.10, -0.05, 0.05, 0.10, 0.20]
-        port_beta = sum(weights.get(t, 0) * betas.get(t, 1.0) for t in weights)
+        portfolio_beta = sum(weights.get(t, 0) * betas.get(t, 1.0) for t in weights)
         data = []
         for s in shocks:
-            impact = port_beta * s
-            data.append({'Market Move': s, 'Portfolio Impact': impact, 'P&L ($)': current_value * impact, 'Portfolio Beta': port_beta})
+            impact = portfolio_beta * s
+            data.append({
+                'Market Move': s,
+                'Portfolio Impact': impact,
+                'P&L ($)': current_value * impact,
+                'Portfolio Beta': portfolio_beta
+            })
         return pd.DataFrame(data)
 
 # ============================================================================
@@ -631,14 +926,58 @@ class VisualizationEnginePro:
         self.template = "plotly_dark"
 
     def create_performance_dashboard(self, data: Dict) -> go.Figure:
-        fig = make_subplots(rows=2, cols=2, subplot_titles=("Portfolio Value", "Drawdown", "Returns", "Risk Metrics"))
-        val = data.get('portfolio_value', pd.Series())
-        if not val.empty:
-            fig.add_trace(go.Scatter(x=val.index, y=val, name='Value', line=dict(color=self.colors['primary'])), row=1, col=1)
-        fig.update_layout(height=800, template=self.template, title="Performance Dashboard")
+        fig = make_subplots(
+            rows=2,
+            cols=2,
+            subplot_titles=("Portfolio Value", "Drawdown", "Daily Returns", "Placeholder")
+        )
+        port_val = data.get('portfolio_value', pd.Series())
+        port_ret = data.get('portfolio_returns', pd.Series())
+
+        if not port_val.empty:
+            fig.add_trace(
+                go.Scatter(
+                    x=port_val.index,
+                    y=port_val,
+                    name='Portfolio Value',
+                    line=dict(color=self.colors['primary'])
+                ),
+                row=1,
+                col=1
+            )
+            running_max = port_val.cummax()
+            drawdown = (port_val - running_max) / running_max
+            fig.add_trace(
+                go.Scatter(
+                    x=drawdown.index,
+                    y=drawdown,
+                    name='Drawdown',
+                    line=dict(color=self.colors['danger'])
+                ),
+                row=1,
+                col=2
+            )
+
+        if not port_ret.empty:
+            fig.add_trace(
+                go.Histogram(
+                    x=port_ret,
+                    name='Daily Returns'
+                ),
+                row=2,
+                col=1
+            )
+
+        fig.update_layout(
+            height=800,
+            template=self.template,
+            title="Portfolio Performance Dashboard"
+        )
         return fig
 
     def create_risk_decomposition_chart(self, component_var: pd.Series, sector_map: Dict) -> go.Figure:
+        if component_var.empty:
+            return go.Figure()
         df = pd.DataFrame({'Asset': component_var.index, 'Risk': component_var.values})
         df['Sector'] = df['Asset'].map(sector_map).fillna('Other')
         fig = px.treemap(df, path=['Sector', 'Asset'], values='Risk', title="Risk Decomposition (Component VaR)")
@@ -646,23 +985,57 @@ class VisualizationEnginePro:
         return fig
 
     def create_attribution_waterfall(self, results: Dict) -> go.Figure:
-        fig = go.Figure(go.Waterfall(
-            measure=["relative", "relative", "relative", "total"],
-            x=["Allocation", "Selection", "Interaction", "Total Excess"],
-            y=[results['allocation'], results['selection'], results['interaction'], results['total_excess']],
-            text=[f"{v:.2%}" for v in [results['allocation'], results['selection'], results['interaction'], results['total_excess']]]
-        ))
+        fig = go.Figure(
+            go.Waterfall(
+                measure=["relative", "relative", "relative", "total"],
+                x=["Allocation", "Selection", "Interaction", "Total Excess"],
+                y[
+                    results.get('allocation', 0.0),
+                    results.get('selection', 0.0),
+                    results.get('interaction', 0.0),
+                    results.get('total_excess', 0.0)
+                ],
+                text=[
+                    f"{results.get('allocation', 0.0):.2%}",
+                    f"{results.get('selection', 0.0):.2%}",
+                    f"{results.get('interaction', 0.0):.2%}",
+                    f"{results.get('total_excess', 0.0):.2%}"
+                ]
+            )
+        )
         fig.update_layout(title="Brinson-Fachler Attribution", template=self.template)
         return fig
 
     def create_stress_test_chart(self, scenario_name: str, result_data: Dict) -> go.Figure:
-        if 'error' in result_data: return go.Figure()
+        if 'error' in result_data:
+            return go.Figure()
         port = result_data['cumulative_series'] * 100
         bench = result_data['benchmark_series'] * 100
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=port.index, y=port, mode='lines', name='Portfolio (Simulated)', line=dict(color=self.colors['primary'], width=3)))
-        fig.add_trace(go.Scatter(x=bench.index, y=bench, mode='lines', name='Benchmark', line=dict(color='#888', width=2, dash='dot')))
-        fig.update_layout(title=f"Stress Test: {scenario_name}", template=self.template, yaxis_title="Rebased Value (100)", height=400)
+        fig.add_trace(
+            go.Scatter(
+                x=port.index,
+                y=port,
+                mode='lines',
+                name='Portfolio (Simulated)',
+                line=dict(color=self.colors['primary'], width=3)
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=bench.index,
+                y=bench,
+                mode='lines',
+                name='Benchmark',
+                line=dict(color='#888', width=2, dash='dot')
+            )
+        )
+        fig.update_layout(
+            title=f"Stress Test: {scenario_name}",
+            template=self.template,
+            yaxis_title="Rebased Value (100)",
+            height=400
+        )
         return fig
 
 # ============================================================================
@@ -670,57 +1043,98 @@ class VisualizationEnginePro:
 # ============================================================================
 
 def main():
-    st.markdown('<div class="main-header"><h1>🏛️ QUANTEDGE PRO</h1><p>Institutional Portfolio Analysis Platform v3.1</p></div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="main-header"><h1>🏛️ QUANTEDGE PRO</h1>'
+        '<p>Institutional Portfolio Analysis Platform v3.2</p></div>',
+        unsafe_allow_html=True
+    )
 
     with st.sidebar:
         st.header("🔧 Configuration")
         universe_name = st.selectbox("Asset Universe", list(Constants.ASSET_UNIVERSES.keys()))
         universe_config = Constants.ASSET_UNIVERSES[universe_name]
         
-        tickers = st.multiselect("Select Assets", universe_config['tickers'], default=universe_config['tickers'][:5])
+        tickers = st.multiselect(
+            "Select Assets",
+            universe_config['tickers'],
+            default=universe_config['tickers'][:5]
+        )
         benchmark = st.text_input("Benchmark", universe_config['benchmark'])
         
         col1, col2 = st.columns(2)
-        start_date = col1.date_input("Start Date", datetime.now() - timedelta(days=365*2))
+        start_date = col1.date_input(
+            "Start Date",
+            datetime.now() - timedelta(days=365 * 2)
+        )
         end_date = col2.date_input("End Date", datetime.now())
         
-        method = st.selectbox("Optimization Method", ["MAX_SHARPE", "MIN_VOLATILITY", "RISK_PARITY", "MEAN_VARIANCE", "HRP"])
+        method = st.selectbox(
+            "Optimization Method",
+            ["MAX_SHARPE", "MIN_VOLATILITY", "RISK_PARITY", "MEAN_VARIANCE", "HRP"]
+        )
         
-        constraints = {}
+        constraints: Dict[str, Any] = {}
         if method == "MEAN_VARIANCE":
             st.markdown("---")
             if st.checkbox("Enable Sector Limits"):
-                constraints['sector_limits'] = {'Technology': (0.0, 0.40)} # Example
+                # Example: Technology sector max 40%
+                constraints['sector_limits'] = {'Technology': (0.0, 0.40)}
 
         st.markdown("---")
         st.header("🧪 Analysis Settings")
         bt_strategy = st.selectbox("Backtest Strategy", ["BUY_HOLD", "REBALANCE_FIXED"])
         
-        # Frequency Mapping Logic
-        bt_freq_ui = st.selectbox("Rebalancing Frequency", ["Monthly", "Quarterly", "Weekly", "Daily"]) if bt_strategy == "REBALANCE_FIXED" else "Monthly"
-        bt_freq = {"Monthly": "M", "Quarterly": "Q", "Weekly": "W", "Daily": "D"}.get(bt_freq_ui, "M")
+        bt_freq_ui = (
+            st.selectbox(
+                "Rebalancing Frequency",
+                ["Monthly", "Quarterly", "Weekly", "Daily"]
+            )
+            if bt_strategy == "REBALANCE_FIXED"
+            else "Monthly"
+        )
+        bt_freq = map_rebalancing_frequency(bt_freq_ui)
         
         run_scenarios = st.checkbox("Run Historical Stress Tests", True)
-        selected_scenarios = []
+        selected_scenarios: List[str] = []
         if run_scenarios:
-            selected_scenarios = st.multiselect("Select Scenarios", list(Constants.HISTORICAL_CRISES.keys()), default=list(Constants.HISTORICAL_CRISES.keys())[:2])
+            selected_scenarios = st.multiselect(
+                "Select Scenarios",
+                list(Constants.HISTORICAL_CRISES.keys()),
+                default=list(Constants.HISTORICAL_CRISES.keys())[:2]
+            )
 
         run_btn = st.button("🚀 RUN ANALYSIS", type="primary", use_container_width=True)
 
     if run_btn:
-        if not tickers: st.error("Please select at least one asset."); st.stop()
+        if not tickers:
+            st.error("Please select at least one asset.")
+            st.stop()
 
         config = PortfolioConfig(
-            universe=universe_name, tickers=tickers, benchmark=benchmark,
-            start_date=start_date, end_date=end_date, risk_free_rate=universe_config['risk_free_rate'],
-            optimization_method=method, rebalancing_frequency=bt_freq, constraints=constraints
+            universe=universe_name,
+            tickers=tickers,
+            benchmark=benchmark,
+            start_date=start_date,
+            end_date=end_date,
+            risk_free_rate=universe_config['risk_free_rate'],
+            optimization_method=method,
+            rebalancing_frequency=bt_freq,
+            constraints=constraints
         )
         
         # 1. Data Fetching
-        with st.spinner("Fetching Market Data..."):
+        with st.spinner("Fetching market data..."):
             dm = PortfolioDataManagerPro()
-            prices, bench_prices = dm.fetch_portfolio_data(tickers, benchmark, start_date, end_date)
-            returns, bench_returns = dm.calculate_returns(prices, bench_prices)
+            prices, bench_prices = dm.fetch_portfolio_data(
+                tickers,
+                benchmark,
+                start_date,
+                end_date
+            )
+            if prices.empty or bench_prices.empty:
+                st.error("No data for selected tickers or benchmark in the given date range.")
+                st.stop()
+            returns, bench_returns = dm.calculate_returns(prices, bench_prices, method='log')
 
         # 2. Classification
         classifier = EnhancedAssetClassifierPro()
@@ -729,19 +1143,42 @@ def main():
 
         # 3. Optimization
         optimizer = AdvancedPortfolioOptimizerPro(returns, prices)
-        weights, perf = optimizer.optimize(method, config)
-        port_series = returns.dot(pd.Series(weights).reindex(returns.columns).fillna(0))
+        weights, perf_tuple = optimizer.optimize(method, config)
+        if not weights:
+            st.error("Optimization failed. Please adjust settings or universe.")
+            st.stop()
 
-        # 4. Risk Analysis
+        # 4. Backtesting (using selected strategy and rebalancing frequency)
+        backtester = PortfolioBacktesterPro(returns)
+        backtest_config = {
+            'type': bt_strategy,
+            'initial_weights': weights,
+            'rebalancing_frequency': config.rebalancing_frequency
+        }
+        backtest_result = backtester.run_backtest(backtest_config)
+        portfolio_value = backtest_result['portfolio_value']
+        portfolio_returns = backtest_result['portfolio_returns']
+
+        # 5. Risk Analysis
         risk_engine = AdvancedRiskAnalyzerPro()
-        risk_metrics = risk_engine.calculate_comprehensive_metrics(port_series, bench_returns, config.risk_free_rate)
+        risk_metrics = risk_engine.calculate_comprehensive_metrics(
+            portfolio_returns,
+            bench_returns,
+            config.risk_free_rate
+        )
         
-        # 5. Attribution
+        # 6. Attribution
         attr_engine = EnhancedPerformanceAttributionPro()
-        bench_weights = {t: 1.0/len(tickers) for t in tickers}
-        attr_res = attr_engine.calculate_brinson_fachler(returns, bench_returns, weights, bench_weights, sector_map)
+        benchmark_equal_weights = {t: 1.0 / len(tickers) for t in tickers}
+        attr_res = attr_engine.calculate_brinson_fachler(
+            returns,
+            bench_returns,
+            weights,
+            benchmark_equal_weights,
+            sector_map
+        )
         
-        # 6. Visualization Setup
+        # 7. Visualization Setup
         viz = VisualizationEnginePro()
         
         # --- DASHBOARD UI ---
@@ -749,37 +1186,68 @@ def main():
         st.markdown('<div class="section-header">📊 Overview</div>', unsafe_allow_html=True)
         c1, c2, c3, c4 = st.columns(4)
         
-        c1.markdown(f"""<div class="pro-card"><div class="metric-label">Annual Return</div>
-            <div class="metric-value">{risk_metrics.get('Annual Return', 0):.2%}</div>
-            <div class="metric-change">vs Bench: {risk_metrics.get('Annual Return', 0) - risk_metrics.get('Benchmark Annual Return', 0):+.2%}</div></div>""", unsafe_allow_html=True)
+        c1.markdown(
+            f"""<div class="pro-card"><div class="metric-label">Annual Return</div>
+            <div class="metric-value">{risk_metrics.get('Annual Return', 0.0):.2%}</div>
+            <div class="metric-change">vs Benchmark: {risk_metrics.get('Annual Return', 0.0) - risk_metrics.get('Benchmark Annual Return', 0.0):+.2%}</div></div>""",
+            unsafe_allow_html=True
+        )
             
-        c2.markdown(f"""<div class="pro-card"><div class="metric-label">Volatility</div>
-            <div class="metric-value">{risk_metrics.get('Annual Volatility', 0):.2%}</div>
-            <div class="metric-change">{risk_metrics.get('Risk Category', 'N/A')}</div></div>""", unsafe_allow_html=True)
+        c2.markdown(
+            f"""<div class="pro-card"><div class="metric-label">Volatility</div>
+            <div class="metric-value">{risk_metrics.get('Annual Volatility', 0.0):.2%}</div>
+            <div class="metric-change">{risk_metrics.get('Risk Category', 'N/A')}</div></div>""",
+            unsafe_allow_html=True
+        )
             
-        c3.markdown(f"""<div class="pro-card"><div class="metric-label">Sharpe Ratio</div>
-            <div class="metric-value">{risk_metrics.get('Sharpe Ratio', 0):.2f}</div></div>""", unsafe_allow_html=True)
+        c3.markdown(
+            f"""<div class="pro-card"><div class="metric-label">Sharpe Ratio</div>
+            <div class="metric-value">{risk_metrics.get('Sharpe Ratio', 0.0):.2f}</div></div>""",
+            unsafe_allow_html=True
+        )
             
-        c4.markdown(f"""<div class="pro-card"><div class="metric-label">Max Drawdown</div>
-            <div class="metric-value negative">{risk_metrics.get('Max Drawdown', 0):.2%}</div>
-            <div class="metric-change">Dur: {risk_metrics.get('Max Drawdown Duration', 0)} days</div></div>""", unsafe_allow_html=True)
+        c4.markdown(
+            f"""<div class="pro-card"><div class="metric-label">Max Drawdown</div>
+            <div class="metric-value negative">{risk_metrics.get('Max Drawdown', 0.0):.2%}</div>
+            <div class="metric-change">Duration: {risk_metrics.get('Max Drawdown Duration', 0)} days</div></div>""",
+            unsafe_allow_html=True
+        )
 
+        # Performance chart
+        st.markdown("### Portfolio Performance")
+        perf_fig = viz.create_performance_dashboard(
+            {'portfolio_value': portfolio_value, 'portfolio_returns': portfolio_returns}
+        )
+        st.plotly_chart(perf_fig, use_container_width=True)
+
+        # Portfolio composition
         st.markdown("### Portfolio Composition")
-        st.bar_chart(pd.DataFrame.from_dict(weights, orient='index', columns=['Weight']).sort_values('Weight', ascending=False))
-        
+        weights_df = (
+            pd.DataFrame.from_dict(weights, orient='index', columns=['Weight'])
+            .sort_values('Weight', ascending=False)
+        )
+        st.bar_chart(weights_df)
+
         col_g1, col_g2 = st.columns(2)
         with col_g1:
             st.markdown("### Risk Decomposition")
-            st.plotly_chart(viz.create_risk_decomposition_chart(risk_engine.calculate_component_var(returns, weights), sector_map), use_container_width=True)
+            component_var = risk_engine.calculate_component_var(returns, weights)
+            st.plotly_chart(
+                viz.create_risk_decomposition_chart(component_var, sector_map),
+                use_container_width=True
+            )
         with col_g2:
             st.markdown("### Attribution Analysis")
-            st.plotly_chart(viz.create_attribution_waterfall(attr_res), use_container_width=True)
+            st.plotly_chart(
+                viz.create_attribution_waterfall(attr_res),
+                use_container_width=True
+            )
 
-        # 7. SCENARIO STRESS TESTING
+        # 8. SCENARIO STRESS TESTING
         if run_scenarios and selected_scenarios:
             st.markdown('<div class="section-header">🌪️ Historical Stress Testing</div>', unsafe_allow_html=True)
             stress_tester = ScenarioStressTester(dm)
-            with st.spinner("Simulating Scenarios..."):
+            with st.spinner("Simulating scenarios..."):
                 stress_res = stress_tester.run_stress_test(selected_scenarios, weights, benchmark)
             
             tabs = st.tabs(list(stress_res.keys()))
@@ -792,31 +1260,52 @@ def main():
                         with sc1:
                             ret_color = "green" if data['portfolio_return'] > 0 else "red"
                             delta = data['portfolio_return'] - data['benchmark_return']
-                            st.markdown(f"""
+                            st.markdown(
+                                f"""
                             <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 10px;">
                                 <div style="color: #888; font-size: 0.9em;">Total Return</div>
                                 <div style="font-size: 1.8em; font-weight: bold; color: {ret_color};">{data['portfolio_return']:.2%}</div>
-                                <div style="font-size: 0.9em; color: {'#00cc96' if delta > 0 else '#ef553b'};">vs Bench: {delta:+.2%}</div>
+                                <div style="font-size: 0.9em; color: {'#00cc96' if delta > 0 else '#ef553b'};">vs Benchmark: {delta:+.2%}</div>
                                 <hr style="border-color: #444;">
                                 <div style="color: #888; font-size: 0.9em;">Max Drawdown</div>
                                 <div style="font-size: 1.4em; font-weight: bold; color: #ef553b;">{data['max_drawdown']:.2%}</div>
                                 <div style="margin-top: 10px; font-size: 0.8em; color: #666;">*Simulated using {data['surviving_assets']} available assets ({data['coverage']:.0%} coverage).</div>
                             </div>
-                            """, unsafe_allow_html=True)
+                            """,
+                                unsafe_allow_html=True
+                            )
                         with sc2:
-                            st.plotly_chart(viz.create_stress_test_chart(scen, data), use_container_width=True)
+                            st.plotly_chart(
+                                viz.create_stress_test_chart(scen, data),
+                                use_container_width=True
+                            )
 
-        # 8. HYPOTHETICAL SHOCKS
+        # 9. HYPOTHETICAL SHOCKS
         st.markdown('<div class="section-header">⚡ Hypothetical Shocks (Beta Sensitivity)</div>', unsafe_allow_html=True)
-        # Quick beta calc
-        mkt_var = bench_returns.var()
-        betas = {t: returns[t].cov(bench_returns)/mkt_var if mkt_var > 0 else 1.0 for t in returns.columns}
+        # Quick beta calculation
+        market_var = bench_returns.var()
+        betas = {
+            t: (returns[t].cov(bench_returns) / market_var) if market_var > 0 else 1.0
+            for t in returns.columns
+        }
         
         stress_tester = ScenarioStressTester(dm)
         shock_df = stress_tester.simulate_hypothetical_shocks(100000, weights, betas)
         
-        def color_pnl(val): return f'color: {"#00cc96" if val > 0 else "#ef553b"}'
-        st.dataframe(shock_df.style.format({'Market Move': '{:+.0%}', 'Portfolio Impact': '{:+.2%}', 'P&L ($)': '${:+,.0f}', 'Portfolio Beta': '{:.2f}'}).applymap(color_pnl, subset=['P&L ($)', 'Portfolio Impact']), use_container_width=True)
+        def color_pnl(val):
+            return f'color: {"#00cc96" if val > 0 else "#ef553b"}'
+        
+        st.dataframe(
+            shock_df.style.format(
+                {
+                    'Market Move': '{:+.0%}',
+                    'Portfolio Impact': '{:+.2%}',
+                    'P&L ($)': '${:+,.0f}',
+                    'Portfolio Beta': '{:.2f}'
+                }
+            ).applymap(color_pnl, subset=['P&L ($)', 'Portfolio Impact']),
+            use_container_width=True
+        )
 
 if __name__ == "__main__":
     main()
