@@ -989,7 +989,7 @@ class VisualizationEnginePro:
             go.Waterfall(
                 measure=["relative", "relative", "relative", "total"],
                 x=["Allocation", "Selection", "Interaction", "Total Excess"],
-                y[
+                y=[
                     results.get('allocation', 0.0),
                     results.get('selection', 0.0),
                     results.get('interaction', 0.0),
