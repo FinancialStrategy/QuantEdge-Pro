@@ -919,7 +919,6 @@ class ScenarioStressTester:
 # ============================================================================
 # 7. VISUALIZATION ENGINE
 # ============================================================================
-
 class VisualizationEnginePro:
     def __init__(self):
         self.colors = {'primary': '#00cc96', 'danger': '#ef553b', 'success': '#00cc96'}
@@ -935,6 +934,7 @@ class VisualizationEnginePro:
         port_ret = data.get('portfolio_returns', pd.Series())
 
         if not port_val.empty:
+            # Portfolio value
             fig.add_trace(
                 go.Scatter(
                     x=port_val.index,
@@ -945,6 +945,7 @@ class VisualizationEnginePro:
                 row=1,
                 col=1
             )
+            # Drawdown
             running_max = port_val.cummax()
             drawdown = (port_val - running_max) / running_max
             fig.add_trace(
@@ -959,6 +960,7 @@ class VisualizationEnginePro:
             )
 
         if not port_ret.empty:
+            # Daily returns histogram
             fig.add_trace(
                 go.Histogram(
                     x=port_ret,
@@ -980,30 +982,43 @@ class VisualizationEnginePro:
             return go.Figure()
         df = pd.DataFrame({'Asset': component_var.index, 'Risk': component_var.values})
         df['Sector'] = df['Asset'].map(sector_map).fillna('Other')
-        fig = px.treemap(df, path=['Sector', 'Asset'], values='Risk', title="Risk Decomposition (Component VaR)")
+        fig = px.treemap(
+            df,
+            path=['Sector', 'Asset'],
+            values='Risk',
+            title="Risk Decomposition (Component VaR)"
+        )
         fig.update_layout(template=self.template)
         return fig
 
     def create_attribution_waterfall(self, results: Dict) -> go.Figure:
+        allocation = results.get('allocation', 0.0)
+        selection = results.get('selection', 0.0)
+        interaction = results.get('interaction', 0.0)
+        total_excess = results.get('total_excess', 0.0)
+
         fig = go.Figure(
             go.Waterfall(
                 measure=["relative", "relative", "relative", "total"],
                 x=["Allocation", "Selection", "Interaction", "Total Excess"],
                 y=[
-                    results.get('allocation', 0.0),
-                    results.get('selection', 0.0),
-                    results.get('interaction', 0.0),
-                    results.get('total_excess', 0.0)
+                    allocation,
+                    selection,
+                    interaction,
+                    total_excess
                 ],
                 text=[
-                    f"{results.get('allocation', 0.0):.2%}",
-                    f"{results.get('selection', 0.0):.2%}",
-                    f"{results.get('interaction', 0.0):.2%}",
-                    f"{results.get('total_excess', 0.0):.2%}"
+                    f"{allocation:.2%}",
+                    f"{selection:.2%}",
+                    f"{interaction:.2%}",
+                    f"{total_excess:.2%}"
                 ]
             )
         )
-        fig.update_layout(title="Brinson-Fachler Attribution", template=self.template)
+        fig.update_layout(
+            title="Brinson-Fachler Attribution",
+            template=self.template
+        )
         return fig
 
     def create_stress_test_chart(self, scenario_name: str, result_data: Dict) -> go.Figure:
@@ -1037,6 +1052,8 @@ class VisualizationEnginePro:
             height=400
         )
         return fig
+
+
 
 # ============================================================================
 # 8. MAIN APPLICATION
