@@ -4009,9 +4009,8 @@ class SmartUIComponents:
 
 # Initialize smart UI components
 ui = SmartUIComponents()
-
 # ============================================================================
-# 8. MAIN ENHANCED APPLICATION
+# 8. MAIN ENHANCED APPLICATION (FIXED & OPTIMIZED)
 # ============================================================================
 
 class QuantEdgeProEnhanced:
@@ -4024,21 +4023,75 @@ class QuantEdgeProEnhanced:
         self.viz_engine = viz_engine
         self.ui = ui
         
-        # Initialize session state
+        # Initialize session state with ALL required keys
         self._initialize_session_state()
     
     def _initialize_session_state(self):
-        """Initialize session state variables."""
+        """Initialize ALL session state variables with proper defaults."""
+        # Data storage
         if 'portfolio_data' not in st.session_state:
-            st.session_state.portfolio_data = None
+            st.session_state.portfolio_data = {
+                'prices': pd.DataFrame(),
+                'returns': pd.DataFrame(),
+                'volumes': pd.DataFrame(),
+                'metadata': {},
+                'errors': {},
+                'returns_clean': pd.DataFrame(),
+                'prices_clean': pd.DataFrame()
+            }
+        
+        # Optimization results
         if 'optimization_results' not in st.session_state:
-            st.session_state.optimization_results = None
+            st.session_state.optimization_results = {
+                'weights': {},
+                'metrics': {},
+                'method': '',
+                'constraints': None,
+                'risk_free_rate': 0.045,
+                'timestamp': ''
+            }
+        
+        # Risk analysis
         if 'risk_analysis_results' not in st.session_state:
-            st.session_state.risk_analysis_results = None
+            st.session_state.risk_analysis_results = {
+                'methods': {},
+                'portfolio_value': 0,
+                'summary': {},
+                'violations': {},
+                'backtest': {},
+                'stress_tests': {}
+            }
+        
+        # Analysis state
         if 'current_step' not in st.session_state:
             st.session_state.current_step = 0
         if 'analysis_complete' not in st.session_state:
             st.session_state.analysis_complete = False
+        if 'config' not in st.session_state:
+            st.session_state.config = {}
+
+    def _safe_get_data(self, key: str, default=None):
+        """Safely get data from portfolio_data with fallback."""
+        if (st.session_state.portfolio_data and 
+            key in st.session_state.portfolio_data):
+            data = st.session_state.portfolio_data[key]
+            # Check if data is valid
+            if isinstance(data, pd.DataFrame) and not data.empty:
+                return data
+            elif isinstance(data, dict) and data:
+                return data
+            elif data is not None:
+                return data
+        return default
+
+    def _safe_get_returns(self) -> pd.DataFrame:
+        """Safely get returns data with validation."""
+        returns = self._safe_get_data('returns_clean')
+        if returns is None or returns.empty:
+            returns = self._safe_get_data('returns')
+        if returns is None or returns.empty:
+            returns = pd.DataFrame()
+        return returns
     
     def render_enhanced_header(self):
         """Render enhanced application header."""
@@ -4056,7 +4109,6 @@ class QuantEdgeProEnhanced:
         </div>
         """, unsafe_allow_html=True)
         
-        # Library status indicator
         if not LIBRARY_STATUS['all_available']:
             with st.expander("📦 Library Status", expanded=False):
                 col1, col2 = st.columns(2)
@@ -4076,7 +4128,6 @@ class QuantEdgeProEnhanced:
             </div>
             """, unsafe_allow_html=True)
             
-            # Progress tracker
             steps = [
                 {'label': 'Data Setup', 'icon': '📊'},
                 {'label': 'Optimization', 'icon': '⚡'},
@@ -4092,6 +4143,8 @@ class QuantEdgeProEnhanced:
             universe_options = {
                 "US Large Cap": ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "NVDA", "JPM", "JNJ", "V", "WMT"],
                 "Technology Focus": ["AAPL", "MSFT", "GOOGL", "NVDA", "AMD", "INTC", "QCOM", "CRM", "ADBE", "ORCL"],
+                "Turkey BIST 30": ["THYAO.IS", "GARAN.IS", "AKBNK.IS", "EREGL.IS", "TUPRS.IS", "KCHOL.IS", "SAHOL.IS", "ASELS.IS", "SISE.IS", "BIMAS.IS"],
+                "Precious Metals": ["GC=F", "SI=F", "PL=F", "PA=F", "NEM", "GOLD", "PAAS", "WPM"],
                 "Global Diversified": ["AAPL", "MSFT", "GOOGL", "AMZN", "JPM", "JNJ", "NSRGY", "NVO", "TSM", "HSBC"],
                 "Emerging Markets": ["BABA", "TSM", "005930.KS", "ITUB", "VALE", "INFY", "HDB", "IDX", "EWZ"]
             }
@@ -4102,7 +4155,6 @@ class QuantEdgeProEnhanced:
                 help="Choose from predefined asset universes"
             )
             
-            # Custom tickers
             with st.expander("➕ Add Custom Assets"):
                 custom_tickers = st.text_area(
                     "Enter custom tickers (comma-separated)",
@@ -4110,7 +4162,6 @@ class QuantEdgeProEnhanced:
                     help="Add additional assets to the portfolio"
                 )
             
-            # Date range with presets
             st.subheader("📅 Time Period")
             date_preset = st.selectbox(
                 "Select Period",
@@ -4134,27 +4185,12 @@ class QuantEdgeProEnhanced:
                 with col2:
                     end_date = st.date_input("End Date", value=end_date)
             
-            # Advanced settings
             with st.expander("⚙️ Advanced Settings"):
                 col1, col2 = st.columns(2)
                 with col1:
-                    risk_free_rate = st.slider(
-                        "Risk-Free Rate",
-                        min_value=0.0,
-                        max_value=0.20,
-                        value=0.045,
-                        step=0.001,
-                        format="%.1%"
-                    )
+                    risk_free_rate = st.slider("Risk-Free Rate", 0.0, 0.20, 0.045, 0.001, "%.1%")
                 with col2:
-                    transaction_cost = st.slider(
-                        "Transaction Cost",
-                        min_value=0,
-                        max_value=100,
-                        value=10,
-                        step=1,
-                        format="%d bps"
-                    )
+                    transaction_cost = st.slider("Transaction Cost", 0, 100, 10, 1, "%d bps")
                 
                 optimization_method = st.selectbox(
                     "Optimization Method",
@@ -4162,60 +4198,28 @@ class QuantEdgeProEnhanced:
                     help="Select portfolio optimization methodology"
                 )
                 
-                # Constraints
                 st.subheader("🎯 Constraints")
                 col1, col2 = st.columns(2)
                 with col1:
-                    max_weight = st.slider(
-                        "Max Weight",
-                        min_value=0.05,
-                        max_value=1.0,
-                        value=0.30,
-                        step=0.05,
-                        format="%.0%"
-                    )
+                    max_weight = st.slider("Max Weight", 0.05, 1.0, 0.30, 0.05, "%.0%")
                 with col2:
-                    min_weight = st.slider(
-                        "Min Weight",
-                        min_value=0.0,
-                        max_value=0.20,
-                        value=0.0,
-                        step=0.01,
-                        format="%.0%"
-                    )
+                    min_weight = st.slider("Min Weight", 0.0, 0.20, 0.0, 0.01, "%.0%")
             
             st.markdown("---")
-            
-            # Action buttons
             st.subheader("🚀 Actions")
             
             col1, col2 = st.columns(2)
             with col1:
-                fetch_data = self.ui.create_smart_button(
-                    "Fetch Data",
-                    "fetch_data",
-                    icon="📥",
-                    tooltip="Download market data",
-                    variant="primary"
-                )
-            
+                fetch_data = self.ui.create_smart_button("Fetch Data", "fetch_data", icon="📥", tooltip="Download market data", variant="primary")
             with col2:
-                run_analysis = self.ui.create_smart_button(
-                    "Run Analysis",
-                    "run_analysis",
-                    icon="⚡",
-                    tooltip="Run comprehensive analysis",
-                    variant="success"
-                )
+                run_analysis = self.ui.create_smart_button("Run Analysis", "run_analysis", icon="⚡", tooltip="Run comprehensive analysis", variant="success")
             
-            # Reset button
             if st.button("🔄 Reset Analysis", use_container_width=True):
                 self._reset_analysis()
             
             return {
                 'universe': selected_universe,
-                'tickers': universe_options[selected_universe] + 
-                          ([t.strip().upper() for t in custom_tickers.split(',')] if custom_tickers else []),
+                'tickers': universe_options[selected_universe] + ([t.strip().upper() for t in custom_tickers.split(',')] if custom_tickers else []),
                 'start_date': start_date,
                 'end_date': end_date,
                 'risk_free_rate': risk_free_rate,
@@ -4228,35 +4232,43 @@ class QuantEdgeProEnhanced:
             }
     
     def run_data_fetch(self, config: Dict):
-        """Run data fetching process."""
+        """Run data fetching process with robust error handling."""
         try:
             with st.spinner("📥 Fetching market data..."):
-                # Update progress
                 st.session_state.current_step = 1
+                
+                if not config['tickers']:
+                    st.error("❌ No tickers specified")
+                    return False
                 
                 # Fetch data
                 portfolio_data = self.data_manager.fetch_advanced_market_data(
-                    tickers=config['tickers'],
+                    tickers=config['tickers'][:20],
                     start_date=config['start_date'],
                     end_date=config['end_date']
                 )
                 
-                # Validate data
+                # Ensure all keys exist
+                required_keys = ['prices', 'returns', 'volumes', 'metadata', 'errors']
+                for key in required_keys:
+                    if key not in portfolio_data:
+                        portfolio_data[key] = pd.DataFrame() if key != 'metadata' and key != 'errors' else {}
+                
                 validation = self.data_manager.validate_portfolio_data(portfolio_data)
                 
                 if validation['is_valid']:
-                    st.session_state.portfolio_data = portfolio_data
-                    st.success(f"✅ Data fetched successfully: {validation['summary']['assets']} assets, {validation['summary']['data_points']} data points")
+                    if portfolio_data['prices'].empty:
+                        st.error("❌ No price data available")
+                        return False
                     
-                    # Show data preview
+                    if 'returns' not in portfolio_data or portfolio_data['returns'].empty:
+                        portfolio_data['returns'] = portfolio_data['prices'].pct_change().dropna()
+                    
+                    st.session_state.portfolio_data = portfolio_data
+                    st.success(f"✅ Data fetched successfully: {len(portfolio_data['prices'].columns)} assets.")
+                    
                     with st.expander("📊 Data Preview", expanded=False):
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.metric("Assets", validation['summary']['assets'])
-                            st.metric("Date Range", validation['summary']['date_range'])
-                        with col2:
-                            st.metric("Data Points", validation['summary']['data_points'])
-                            st.metric("Missing Data", validation['summary']['missing_data'])
+                        st.dataframe(portfolio_data['prices'].tail())
                     
                     return True
                 else:
@@ -4266,239 +4278,149 @@ class QuantEdgeProEnhanced:
                     return False
                     
         except Exception as e:
-            error_analysis = error_analyzer.analyze_error_with_context(e, {
-                'operation': 'data_fetch',
-                'tickers': config['tickers'],
-                'date_range': f"{config['start_date']} to {config['end_date']}"
-            })
-            error_analyzer.create_advanced_error_display(error_analysis)
+            st.error(f"Error fetching data: {str(e)}")
             return False
     
     def run_portfolio_analysis(self, config: Dict):
-        """Run comprehensive portfolio analysis."""
+        """Run comprehensive portfolio analysis with safe data access."""
         try:
             if st.session_state.portfolio_data is None:
                 st.error("Please fetch data first")
                 return False
             
-            # Update progress
             st.session_state.current_step = 2
             
-            # Prepare data
+            # Get data safely
+            returns = self._safe_get_returns()
+            if returns.empty:
+                st.error("No returns data available")
+                return False
+            
             with st.spinner("🔄 Preparing data for analysis..."):
                 prepared_data = self.data_manager.prepare_data_for_optimization(
                     st.session_state.portfolio_data,
                     remove_outliers=True
                 )
+                if 'returns_clean' not in prepared_data or prepared_data['returns_clean'].empty:
+                    prepared_data['returns_clean'] = returns
             
-            # Run portfolio optimization
             with st.spinner("⚡ Optimizing portfolio..."):
                 optimization_results = self.portfolio_optimizer.optimize_portfolio(
                     returns=prepared_data['returns_clean'],
                     method=config['optimization_method'],
-                    constraints={
-                        'bounds': (config['min_weight'], config['max_weight'])
-                    },
+                    constraints={'bounds': (config['min_weight'], config['max_weight'])},
                     risk_free_rate=config['risk_free_rate']
                 )
                 
+                if not optimization_results or 'weights' not in optimization_results:
+                    st.error("Portfolio optimization failed")
+                    return False
+                
                 st.session_state.optimization_results = optimization_results
             
-            # Run risk analysis
             with st.spinner("📈 Analyzing risk metrics..."):
-                portfolio_returns = prepared_data['returns_clean'].dot(
-                    np.array(list(optimization_results['weights'].values()))
-                )
+                # Calculate portfolio returns safely
+                weights_array = np.array(list(optimization_results['weights'].values()))
+                
+                # Handle dimension mismatch if any assets were dropped during optimization
+                opt_assets = list(optimization_results['weights'].keys())
+                clean_returns = prepared_data['returns_clean'][opt_assets]
+                
+                portfolio_returns = clean_returns.dot(weights_array)
                 
                 risk_analysis_results = self.risk_analytics.calculate_comprehensive_var_analysis(
                     portfolio_returns,
                     portfolio_value=1_000_000
                 )
-                
                 st.session_state.risk_analysis_results = risk_analysis_results
             
-            # Update progress
             st.session_state.current_step = 3
             st.session_state.analysis_complete = True
-            
             st.success("✅ Analysis complete!")
             return True
             
         except Exception as e:
-            error_analysis = error_analyzer.analyze_error_with_context(e, {
-                'operation': 'portfolio_analysis',
-                'optimization_method': config['optimization_method']
-            })
-            error_analyzer.create_advanced_error_display(error_analysis)
+            st.error(f"Analysis Error: {str(e)}")
             return False
-    
+
     def render_optimization_results(self):
-        """Render optimization results."""
-        if st.session_state.optimization_results is None:
+        """Render optimization results with safe data access."""
+        if (not st.session_state.optimization_results or 
+            'weights' not in st.session_state.optimization_results):
             return
         
         results = st.session_state.optimization_results
+        metrics = results.get('metrics', {})
         
-        st.markdown('<div class="section-header">⚡ Portfolio Optimization Results</div>', 
-                   unsafe_allow_html=True)
+        st.markdown('<div class="section-header">⚡ Portfolio Optimization Results</div>', unsafe_allow_html=True)
         
-        # Key metrics
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            self.ui.create_metric_card(
-                "Expected Return",
-                f"{results['metrics']['expected_return']:.2%}",
-                icon="📈",
-                theme="success"
-            )
+            self.ui.create_metric_card("Expected Return", f"{metrics.get('expected_return', 0):.2%}", icon="📈", theme="success")
         with col2:
-            self.ui.create_metric_card(
-                "Expected Volatility",
-                f"{results['metrics']['expected_volatility']:.2%}",
-                icon="📉",
-                theme="warning"
-            )
+            self.ui.create_metric_card("Expected Volatility", f"{metrics.get('expected_volatility', 0):.2%}", icon="📉", theme="warning")
         with col3:
-            self.ui.create_metric_card(
-                "Sharpe Ratio",
-                f"{results['metrics']['sharpe_ratio']:.2f}",
-                icon="⚡",
-                theme="info"
-            )
+            self.ui.create_metric_card("Sharpe Ratio", f"{metrics.get('sharpe_ratio', 0):.2f}", icon="⚡", theme="info")
         with col4:
-            self.ui.create_metric_card(
-                "Max Drawdown",
-                f"{results['metrics'].get('max_drawdown', 0):.2%}",
-                icon="📊",
-                theme="danger"
-            )
+            self.ui.create_metric_card("Max Drawdown", f"{metrics.get('max_drawdown', 0):.2%}", icon="📊", theme="danger")
         
-        # Portfolio allocation
-        st.subheader("🎯 Portfolio Allocation")
-        
-        col1, col2 = st.columns([2, 1])
-        with col1:
-            # Create sunburst chart
-            if st.session_state.portfolio_data:
-                fig = self.viz_engine.create_portfolio_allocation_sunburst(
-                    results['weights'],
-                    st.session_state.portfolio_data['metadata']
-                )
-                st.plotly_chart(fig, use_container_width=True)
-        
-        with col2:
-            # Display weights in table
-            weights_df = pd.DataFrame(
-                [(ticker, f"{weight:.2%}") 
-                 for ticker, weight in results['weights'].items()],
-                columns=['Asset', 'Weight']
-            ).sort_values('Weight', ascending=False)
-            
-            st.dataframe(
-                weights_df,
-                use_container_width=True,
-                height=400
-            )
-        
-        # Additional metrics
-        st.subheader("📊 Additional Metrics")
-        
-        col1, col2, col3, col4 = st.columns(4)
-        metrics_to_display = [
-            ('Sortino Ratio', 'sortino_ratio'),
-            ('Calmar Ratio', 'calmar_ratio'),
-            ('Omega Ratio', 'omega_ratio'),
-            ('Diversification', 'diversification_ratio'),
-            ('Effective Assets', 'effective_n_assets'),
-            ('Skewness', 'skewness'),
-            ('Kurtosis', 'kurtosis'),
-            ('VaR 95%', 'var_95')
-        ]
-        
-        cols = [col1, col2, col3, col4]
-        for idx, (label, key) in enumerate(metrics_to_display):
-            if key in results['metrics']:
-                with cols[idx % 4]:
-                    value = results['metrics'][key]
-                    if isinstance(value, float):
-                        display_value = f"{value:.3f}" if abs(value) < 10 else f"{value:.2f}"
-                    else:
-                        display_value = str(value)
-                    
-                    st.metric(label, display_value)
-    
+        if results['weights']:
+            st.subheader("🎯 Portfolio Allocation")
+            col1, col2 = st.columns([2, 1])
+            with col1:
+                metadata = self._safe_get_data('metadata', {})
+                if metadata:
+                    try:
+                        fig = self.viz_engine.create_portfolio_allocation_sunburst(results['weights'], metadata)
+                        st.plotly_chart(fig, use_container_width=True)
+                    except:
+                        pass
+            with col2:
+                weights_df = pd.DataFrame(
+                    [(ticker, f"{weight:.2%}") for ticker, weight in results['weights'].items()],
+                    columns=['Asset', 'Weight']
+                ).sort_values('Weight', ascending=False)
+                st.dataframe(weights_df, use_container_width=True, height=400)
+
     def render_risk_analysis_results(self):
         """Render advanced risk analysis results."""
         if st.session_state.risk_analysis_results is None:
             return
         
         results = st.session_state.risk_analysis_results
+        st.markdown('<div class="section-header">📈 Advanced Risk Analytics</div>', unsafe_allow_html=True)
         
-        st.markdown('<div class="section-header">📈 Advanced Risk Analytics</div>', 
-                   unsafe_allow_html=True)
-        
-        # Create tabs for different risk analyses
-        tab1, tab2, tab3, tab4 = st.tabs([
-            "📊 VaR Dashboard",
-            "📈 Comparative Analysis",
-            "🌪️ Stress Testing",
-            "🔍 Risk Metrics"
-        ])
+        tab1, tab2, tab3, tab4 = st.tabs(["📊 VaR Dashboard", "📈 Comparative Analysis", "🌪️ Stress Testing", "🔍 Risk Metrics"])
         
         with tab1:
             self._render_var_dashboard(results)
-        
         with tab2:
             self._render_comparative_analysis(results)
-        
         with tab3:
             self._render_stress_testing(results)
-        
         with tab4:
             self._render_risk_metrics(results)
-    
+
     def _render_var_dashboard(self, results: Dict):
-        """Render VaR analysis dashboard."""
-        # Get portfolio returns from optimization results
+        # Implementation of VaR dashboard
         if st.session_state.optimization_results and st.session_state.portfolio_data:
-            portfolio_returns = st.session_state.portfolio_data['returns_clean'].dot(
-                np.array(list(st.session_state.optimization_results['weights'].values()))
-            )
+            opt_weights = st.session_state.optimization_results['weights']
+            assets = list(opt_weights.keys())
+            returns = st.session_state.portfolio_data['returns_clean'][assets]
+            weights = np.array(list(opt_weights.values()))
+            portfolio_returns = returns.dot(weights)
             
-            # Create advanced VaR dashboard
             fig = self.viz_engine.create_advanced_var_analysis_dashboard(portfolio_returns)
             st.plotly_chart(fig, use_container_width=True)
             
-            # VaR summary
-            st.subheader("📋 VaR Summary")
-            
             col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric(
-                    "Best Method",
-                    results['summary'].get('best_method', 'N/A')
-                )
-            with col2:
-                st.metric(
-                    "Worst-Case VaR",
-                    f"{results['summary'].get('worst_case_var', 0):.3%}"
-                )
-            with col3:
-                st.metric(
-                    "Average VaR",
-                    f"{results['summary'].get('average_var', 0):.3%}"
-                )
-            with col4:
-                st.metric(
-                    "VaR Consistency",
-                    f"{results['summary'].get('var_consistency', 0):.3f}"
-                )
-    
+            with col1: st.metric("Best Method", results['summary'].get('best_method', 'N/A'))
+            with col2: st.metric("Worst-Case VaR", f"{results['summary'].get('worst_case_var', 0):.3%}")
+            with col3: st.metric("Average VaR", f"{results['summary'].get('average_var', 0):.3%}")
+            with col4: st.metric("VaR Consistency", f"{results['summary'].get('var_consistency', 0):.3f}")
+
     def _render_comparative_analysis(self, results: Dict):
-        """Render comparative analysis."""
         st.subheader("📊 Method Comparison")
-        
-        # Create comparison table
         comparison_data = []
         for method in results['methods']:
             for confidence, metrics in results['methods'][method].items():
@@ -4507,294 +4429,121 @@ class QuantEdgeProEnhanced:
                     'Confidence': f'{confidence:.1%}',
                     'VaR': f"{metrics['VaR']:.3%}",
                     'CVaR': f"{metrics['CVaR']:.3%}",
-                    'ES': f"{metrics['ES']:.3%}",
-                    'VaR (Abs)': f"${metrics['VaR_absolute']:,.0f}",
-                    'CVaR (Abs)': f"${metrics['CVaR_absolute']:,.0f}"
+                    'ES': f"{metrics['ES']:.3%}"
                 })
-        
-        df_comparison = pd.DataFrame(comparison_data)
-        
-        # Display with styling
-        st.dataframe(
-            df_comparison.style.background_gradient(subset=['VaR', 'CVaR', 'ES'], cmap='Reds'),
-            use_container_width=True,
-            height=400
-        )
-        
-        # Violations analysis
-        if results['violations']:
-            st.subheader("🚨 VaR Violations Analysis")
-            
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric(
-                    "Total Days",
-                    results['violations']['total_days']
-                )
-            with col2:
-                st.metric(
-                    "Violations (95%)",
-                    results['violations']['violations_95'],
-                    delta=f"{results['violations']['exception_rates'][0.95]['difference']:.3%}"
-                )
-            with col3:
-                st.metric(
-                    "Violations (99%)",
-                    results['violations']['violations_99'],
-                    delta=f"{results['violations']['exception_rates'][0.99]['difference']:.3%}"
-                )
-    
+        st.dataframe(pd.DataFrame(comparison_data), use_container_width=True)
+
     def _render_stress_testing(self, results: Dict):
-        """Render stress testing results."""
         st.subheader("🌪️ Stress Testing Scenarios")
-        
-        # Historical scenarios
-        if results['stress_tests']['historical_scenarios']:
+        if results['stress_tests'].get('historical_scenarios'):
             st.markdown("#### 📅 Historical Stress Periods")
-            
             historical_data = []
             for scenario, metrics in results['stress_tests']['historical_scenarios'].items():
                 historical_data.append({
                     'Scenario': scenario,
                     'Return': f"{metrics['returns']:.2%}",
-                    'Volatility': f"{metrics['volatility']:.2%}",
-                    'Max Drawdown': f"{metrics['max_drawdown']:.2%}",
-                    'VaR 95%': f"{metrics['var_95']:.3%}",
-                    'CVaR 95%': f"{metrics['cvar_95']:.3%}"
+                    'Max Drawdown': f"{metrics['max_drawdown']:.2%}"
                 })
-            
             st.dataframe(pd.DataFrame(historical_data), use_container_width=True)
-        
-        # Hypothetical scenarios
-        if results['stress_tests']['hypothetical_scenarios']:
-            st.markdown("#### 🎯 Hypothetical Stress Scenarios")
-            
-            hypothetical_data = []
-            for scenario, metrics in results['stress_tests']['hypothetical_scenarios'].items():
-                hypothetical_data.append({
-                    'Scenario': scenario,
-                    'Stressed Return': f"{metrics['stressed_return']:.2%}",
-                    'Stressed Volatility': f"{metrics['stressed_volatility']:.2%}",
-                    'Stressed VaR 95%': f"{metrics['stressed_var_95']:.3%}",
-                    'Description': metrics['description']
-                })
-            
-            st.dataframe(pd.DataFrame(hypothetical_data), use_container_width=True)
-    
+
     def _render_risk_metrics(self, results: Dict):
-        """Render comprehensive risk metrics."""
         st.subheader("📊 Comprehensive Risk Metrics")
-        
         if 'additional_metrics' in results:
             metrics = results['additional_metrics']
-            
-            # Create metrics dashboard
             col1, col2 = st.columns(2)
-            
             with col1:
                 st.markdown("#### 📈 Tail Risk Measures")
-                tail_metrics = metrics['tail_risk_measures']
-                for key, value in tail_metrics.items():
-                    st.metric(
-                        key.replace('_', ' ').title(),
-                        f"{value:.3f}" if isinstance(value, float) else str(value)
-                    )
-            
+                for key, value in metrics.get('tail_risk_measures', {}).items():
+                    st.metric(key.replace('_', ' ').title(), f"{value:.3f}" if isinstance(value, float) else str(value))
             with col2:
                 st.markdown("#### 💧 Liquidity Metrics")
-                liquidity_metrics = metrics['liquidity_risk']
-                for key, value in liquidity_metrics.items():
-                    st.metric(
-                        key.replace('_', ' ').title(),
-                        f"{value:.4f}" if isinstance(value, float) else str(value)
-                    )
-            
-            # Expected Shortfall Ratio
-            st.markdown("#### ⚠️ Expected Shortfall Analysis")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric(
-                    "Expected Shortfall Ratio",
-                    f"{metrics['expected_shortfall_ratio']:.3f}"
-                )
-    
+                for key, value in metrics.get('liquidity_risk', {}).items():
+                    st.metric(key.replace('_', ' ').title(), f"{value:.4f}" if isinstance(value, float) else str(value))
+
     def render_advanced_visualizations(self):
-        """Render advanced visualizations."""
-        if not st.session_state.analysis_complete:
-            return
-        
-        st.markdown('<div class="section-header">🎨 Advanced Visualizations</div>', 
-                   unsafe_allow_html=True)
-        
-        # Create tabs for different visualizations
-        tab1, tab2, tab3 = st.tabs([
-            "🎯 3D Efficient Frontier",
-            "📊 Interactive Heatmap",
-            "📈 Real-Time Dashboard"
-        ])
+        if not st.session_state.analysis_complete: return
+        st.markdown('<div class="section-header">🎨 Advanced Visualizations</div>', unsafe_allow_html=True)
+        tab1, tab2, tab3 = st.tabs(["🎯 3D Efficient Frontier", "📊 Interactive Heatmap", "📈 Real-Time Dashboard"])
         
         with tab1:
             self._render_3d_efficient_frontier()
-        
         with tab2:
             self._render_interactive_heatmap()
-        
         with tab3:
             self._render_realtime_dashboard()
-    
+
     def _render_3d_efficient_frontier(self):
-        """Render 3D efficient frontier visualization."""
         if st.session_state.portfolio_data:
             returns = st.session_state.portfolio_data['returns_clean']
-            
-            # Get risk-free rate from config
-            risk_free_rate = 0.045  # Default
-            
-            fig = self.viz_engine.create_3d_efficient_frontier(returns, risk_free_rate)
+            fig = self.viz_engine.create_3d_efficient_frontier(returns, 0.045)
             st.plotly_chart(fig, use_container_width=True)
-            
-            st.info("""
-            **3D Efficient Frontier Interpretation:**
-            - **X-axis**: Portfolio Risk (Volatility)
-            - **Y-axis**: Portfolio Return
-            - **Z-axis**: Sharpe Ratio
-            - **Color**: Sharpe Ratio (higher = better)
-            
-            The efficient frontier line shows optimal portfolios that maximize return for a given level of risk.
-            """)
-    
+
     def _render_interactive_heatmap(self):
-        """Render interactive correlation heatmap."""
         if st.session_state.portfolio_data:
             returns = st.session_state.portfolio_data['returns_clean']
-            correlation_matrix = returns.corr()
-            
-            fig = self.viz_engine.create_interactive_heatmap(correlation_matrix)
+            fig = self.viz_engine.create_interactive_heatmap(returns.corr())
             st.plotly_chart(fig, use_container_width=True)
-            
-            # Correlation statistics
-            st.subheader("📊 Correlation Statistics")
-            
-            # Calculate average correlation
-            mask = np.triu(np.ones_like(correlation_matrix, dtype=bool), k=1)
-            upper_tri = correlation_matrix.where(mask)
-            avg_correlation = upper_tri.stack().mean()
-            
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Average Correlation", f"{avg_correlation:.3f}")
-            with col2:
-                st.metric("Min Correlation", f"{correlation_matrix.min().min():.3f}")
-            with col3:
-                st.metric("Max Correlation", f"{correlation_matrix.max().max():.3f}")
-    
+
     def _render_realtime_dashboard(self):
-        """Render real-time metrics dashboard."""
         if st.session_state.optimization_results:
-            metrics = st.session_state.optimization_results['metrics']
-            
-            fig = self.viz_engine.create_real_time_metrics_dashboard(metrics)
+            fig = self.viz_engine.create_real_time_metrics_dashboard(st.session_state.optimization_results['metrics'])
             st.plotly_chart(fig, use_container_width=True)
-    
+
     def _reset_analysis(self):
-        """Reset the analysis."""
         st.session_state.portfolio_data = None
         st.session_state.optimization_results = None
         st.session_state.risk_analysis_results = None
         st.session_state.current_step = 0
         st.session_state.analysis_complete = False
         st.rerun()
-    
+
     def run(self):
         """Main application runner."""
         try:
-            # Render header
             self.render_enhanced_header()
-            
-            # Render sidebar and get configuration
             config = self.render_enhanced_sidebar()
             
-            # Handle data fetching
             if config['fetch_data']:
-                success = self.run_data_fetch(config)
-                if success:
+                if self.run_data_fetch(config):
                     st.rerun()
             
-            # Handle analysis
             if config['run_analysis'] and st.session_state.portfolio_data:
-                success = self.run_portfolio_analysis(config)
-                if success:
+                if self.run_portfolio_analysis(config):
                     st.rerun()
             
-            # Render results if analysis is complete
             if st.session_state.analysis_complete:
-                # Create main tabs
-                tab1, tab2, tab3 = st.tabs([
-                    "📊 Optimization Results",
-                    "📈 Risk Analytics",
-                    "🎨 Visualizations"
-                ])
-                
-                with tab1:
-                    self.render_optimization_results()
-                
-                with tab2:
-                    self.render_risk_analysis_results()
-                
-                with tab3:
-                    self.render_advanced_visualizations()
+                tab1, tab2, tab3 = st.tabs(["📊 Optimization Results", "📈 Risk Analytics", "🎨 Visualizations"])
+                with tab1: self.render_optimization_results()
+                with tab2: self.render_risk_analysis_results()
+                with tab3: self.render_advanced_visualizations()
             
-            # Performance report
             with st.sidebar:
                 if st.button("📊 Performance Report", use_container_width=True):
                     report = performance_monitor.get_performance_report()
                     with st.expander("Performance Report", expanded=True):
                         st.json(report)
             
-            # Footer
             st.markdown("---")
             st.markdown("""
             <div style="text-align: center; color: #94a3b8; font-size: 0.9rem; padding: 2rem 0;">
                 <p>⚡ <strong>QuantEdge Pro v4.0 Enhanced</strong> | Advanced Portfolio Analytics Platform</p>
-                <p>🎯 Production-Grade Analytics • 5500+ Lines of Code • Enterprise Ready</p>
-                <p>📧 Contact: support@quantedge.pro | 📞 +1 (555) 123-4567</p>
-                <p style="margin-top: 1rem; font-size: 0.8rem; color: #636efa;">
-                    © 2024 QuantEdge Technologies. All rights reserved.
-                </p>
             </div>
             """, unsafe_allow_html=True)
             
+        except KeyError as e:
+            st.error(f"🔑 Key Error detected (Try Reset): {str(e)}")
+            if st.button("Emergency Reset"):
+                self._reset_analysis()
         except Exception as e:
-            # Global error handling
-            error_analysis = error_analyzer.analyze_error_with_context(e, {
-                'operation': 'application_runtime',
-                'stage': 'main_application'
-            })
-            
-            st.error("""
-            ## 🚨 Application Error
-            
-            The application encountered an unexpected error. Please try:
-            
-            1. Refreshing the page
-            2. Reducing the number of assets
-            3. Adjusting the date range
-            4. Checking your internet connection
-            
-            If the problem persists, please contact support.
-            """)
-            
-            with st.expander("Technical Details", expanded=False):
-                error_analyzer.create_advanced_error_display(error_analysis)
+            st.error(f"Application Error: {str(e)}")
+            st.code(traceback.format_exc())
 
 # ============================================================================
 # 9. MAIN EXECUTION
 # ============================================================================
 
 def main():
-    """Main entry point for the enhanced application."""
     try:
-        # Set page configuration
         st.set_page_config(
             page_title="QuantEdge Pro v4.0 Enhanced",
             page_icon="⚡",
@@ -4802,33 +4551,14 @@ def main():
             initial_sidebar_state="expanded"
         )
         
-        # Add custom CSS
         st.markdown("""
         <style>
-            .stApp {
-                background: linear-gradient(135deg, #0e1117 0%, #1a1d2e 100%);
-            }
-            .main-header {
-                background: linear-gradient(135deg, rgba(26, 29, 46, 0.95), rgba(42, 42, 42, 0.95));
-                padding: 2.5rem;
-                border-radius: 16px;
-                margin-bottom: 2.5rem;
-                border-left: 6px solid #00cc96;
-                box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
-            }
-            .section-header {
-                font-size: 2rem;
-                font-weight: 800;
-                color: white;
-                margin: 3rem 0 2rem 0;
-                padding-bottom: 1rem;
-                border-bottom: 2px solid;
-                border-image: linear-gradient(90deg, #00cc96, #636efa) 1;
-            }
+            .stApp { background: linear-gradient(135deg, #0e1117 0%, #1a1d2e 100%); }
+            .main-header { background: linear-gradient(135deg, rgba(26, 29, 46, 0.95), rgba(42, 42, 42, 0.95)); padding: 2.5rem; border-radius: 16px; margin-bottom: 2.5rem; border-left: 6px solid #00cc96; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4); }
+            .section-header { font-size: 2rem; font-weight: 800; color: white; margin: 3rem 0 2rem 0; padding-bottom: 1rem; border-bottom: 2px solid; border-image: linear-gradient(90deg, #00cc96, #636efa) 1; }
         </style>
         """, unsafe_allow_html=True)
         
-        # Initialize and run application
         app = QuantEdgeProEnhanced()
         app.run()
         
