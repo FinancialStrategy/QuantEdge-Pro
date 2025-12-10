@@ -4012,6 +4012,9 @@ ui = SmartUIComponents()
 # ============================================================================
 # 8. MAIN ENHANCED APPLICATION (FIXED & OPTIMIZED)
 # ============================================================================
+# ============================================================================
+# 8. MAIN ENHANCED APPLICATION (FIXED & OPTIMIZED)
+# ============================================================================
 
 class QuantEdgeProEnhanced:
     """Enhanced QuantEdge Pro application with all advanced features."""
@@ -4143,8 +4146,6 @@ class QuantEdgeProEnhanced:
             universe_options = {
                 "US Large Cap": ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "NVDA", "JPM", "JNJ", "V", "WMT"],
                 "Technology Focus": ["AAPL", "MSFT", "GOOGL", "NVDA", "AMD", "INTC", "QCOM", "CRM", "ADBE", "ORCL"],
-                "Turkey BIST 30": ["THYAO.IS", "GARAN.IS", "AKBNK.IS", "EREGL.IS", "TUPRS.IS", "KCHOL.IS", "SAHOL.IS", "ASELS.IS", "SISE.IS", "BIMAS.IS"],
-                "Precious Metals": ["GC=F", "SI=F", "PL=F", "PA=F", "NEM", "GOLD", "PAAS", "WPM"],
                 "Global Diversified": ["AAPL", "MSFT", "GOOGL", "AMZN", "JPM", "JNJ", "NSRGY", "NVO", "TSM", "HSBC"],
                 "Emerging Markets": ["BABA", "TSM", "005930.KS", "ITUB", "VALE", "INFY", "HDB", "IDX", "EWZ"]
             }
