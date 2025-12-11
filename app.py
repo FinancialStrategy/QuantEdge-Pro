@@ -56,7 +56,7 @@ class EnhancedPortfolioConfig:
         # Benchmark - using ^GSPC (S&P 500 Index) or a regional index like XU100.IS
         self.BENCHMARK = '^GSPC' if 'US_Equities' in custom_assets else 'XU100.IS'
 
-        # Dynamic date parameters (MODIFIED HERE)
+        # Dynamic date parameters (FIXED: Shorter lookback for Turkish assets)
         self.END_DATE = datetime.now().strftime('%Y-%m-%d')
         
         # Check benchmark to determine historical lookback period
