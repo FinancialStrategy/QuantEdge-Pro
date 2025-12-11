@@ -56,9 +56,17 @@ class EnhancedPortfolioConfig:
         # Benchmark - using ^GSPC (S&P 500 Index) or a regional index like XU100.IS
         self.BENCHMARK = '^GSPC' if 'US_Equities' in custom_assets else 'XU100.IS'
 
-        # Dynamic date parameters
+        # Dynamic date parameters (MODIFIED HERE)
         self.END_DATE = datetime.now().strftime('%Y-%m-%d')
-        self.START_DATE = (datetime.now() - timedelta(days=6 * 365)).strftime('%Y-%m-%d')  # 6 years
+        
+        # Check benchmark to determine historical lookback period
+        if self.BENCHMARK == 'XU100.IS':
+             # Use 3 years for the more volatile/less reliable international data source
+             self.START_DATE = (datetime.now() - timedelta(days=3 * 365)).strftime('%Y-%m-%d') 
+        else:
+             # Use 6 years for the robust US/Global data
+             self.START_DATE = (datetime.now() - timedelta(days=6 * 365)).strftime('%Y-%m-%d')
+        # END MODIFIED DYNAMIC DATE PARAMETERS
 
         # Optimization parameters
         self.MIN_WEIGHT = 0.01
@@ -468,12 +476,12 @@ class AdvancedPortfolioOptimizer:
 
             # pypfopt constraint requires the function to return a scalar indicating constraint violation
             def low_vol_tilt_constraint(w):
-                # Constraint: w @ factor_vec >= tilt_target --> tilt_target - w @ factor_vec <= 0 (ineq)
+                # Constraint: w @ factor_vec >= tilt_target --> w @ factor_vec - tilt_target >= 0 (ineq)
                 return w @ factor_vec - tilt_target
 
             # Apply standard constraints
             self._apply_enhanced_constraints(ef)
-            # Apply factor tilt constraint (pypfopt assumes inequality constraints are >= 0 if type not specified)
+            # Apply factor tilt constraint 
             ef.add_constraint(low_vol_tilt_constraint, 'ineq') 
 
             ef.max_sharpe(risk_free_rate=self.risk_free_rate)
