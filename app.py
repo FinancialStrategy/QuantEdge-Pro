@@ -43,6 +43,18 @@ from pathlib import Path
 
 warnings.filterwarnings('ignore')
 
+# --- Portfolio optimization imports (core engine) ---
+PYPFOPT_AVAILABLE = False
+try:
+    from pypfopt import expected_returns, risk_models
+    from pypfopt.efficient_frontier import EfficientFrontier
+    from pypfopt.cla import CLA
+    from pypfopt.hierarchical_portfolio import HRPOpt
+    from pypfopt.black_litterman import BlackLittermanModel, market_implied_prior_returns
+    PYPFOPT_AVAILABLE = True
+except ImportError:
+    PYPFOPT_AVAILABLE = False
+
 # ============================================================================
 # CONFIGURATION MANAGEMENT
 # ============================================================================
@@ -51,8 +63,7 @@ class Config:
     """Centralized configuration for QuantEdge Pro."""
     
     # Data fetching
-    # Allow large institutional universes (your 70-ticker set) but still protect against abuse
-    MAX_TICKERS = 150
+    MAX_TICKERS = 150          # ⬆ bumped so 70+ ticker universe is allowed
     MAX_WORKERS = 10
     DATA_TIMEOUT = 30
     RETRY_ATTEMPTS = 3
@@ -126,26 +137,20 @@ def monitor_operation(operation_name: str):
     """Decorator to monitor operation performance and errors."""
     def decorator(func):
         def wrapper(*args, **kwargs):
-            # Get performance monitor from global context or args
             performance_monitor = None
             
-            # Check if we're already in a monitored operation to prevent recursion
             if hasattr(st.session_state, 'performance_monitor'):
                 performance_monitor = st.session_state.performance_monitor
-                
-                # Check if this operation is already being monitored
                 if operation_name in performance_monitor.operations:
                     op = performance_monitor.operations[operation_name]
                     if 'is_running' in op and op['is_running']:
-                        # Already running, skip monitoring to prevent recursion
+                        # Already running: avoid recursion
                         return func(*args, **kwargs)
             
             if performance_monitor:
-                # Mark operation as running before starting
                 if operation_name not in performance_monitor.operations:
                     performance_monitor.operations[operation_name] = {}
                 performance_monitor.operations[operation_name]['is_running'] = True
-                
                 performance_monitor.start_operation(operation_name)
             
             try:
@@ -157,30 +162,21 @@ def monitor_operation(operation_name: str):
                 if performance_monitor:
                     performance_monitor.end_operation(operation_name, {'error': str(e)})
                 
-                # Get error analyzer from global context
-                error_analyzer = None
-                if hasattr(st.session_state, 'error_analyzer'):
-                    error_analyzer = st.session_state.error_analyzer
-                
+                error_analyzer = getattr(st.session_state, 'error_analyzer', None)
                 if error_analyzer:
                     context = {
                         'operation': operation_name,
                         'function': func.__name__,
                         'module': func.__module__
                     }
-                    # Use a non-decorated method to analyze errors to prevent recursion
                     analysis = error_analyzer._analyze_error_safely(e, context)
-                    
-                    # Display error if in Streamlit context
                     if 'streamlit' in sys.modules:
                         try:
                             error_analyzer.create_advanced_error_display(analysis)
-                        except:
-                            # Fallback simple error display
+                        except Exception:
                             st.error(f"Error in {operation_name}: {str(e)[:100]}...")
                 raise
             finally:
-                # Always mark operation as not running
                 if performance_monitor and operation_name in performance_monitor.operations:
                     performance_monitor.operations[operation_name]['is_running'] = False
         return wrapper
@@ -211,12 +207,10 @@ class AdvancedLibraryManager:
     
     @staticmethod
     def check_and_import_all():
-        """Check and import all required libraries with advanced capabilities."""
         lib_status = {}
         missing_libs = []
         advanced_features = {}
         
-        # Core libraries (required)
         core_libraries = {
             'numpy': ('np', 'Numerical computing'),
             'pandas': ('pd', 'Data manipulation'),
@@ -234,7 +228,6 @@ class AdvancedLibraryManager:
                 lib_status[lib_name] = False
                 missing_libs.append(f"{lib_name} ({description})")
         
-        # Advanced libraries (optional but recommended)
         advanced_libraries = {
             'pypfopt': {
                 'modules': ['expected_returns', 'risk_models', 'EfficientFrontier', 'HRPOpt', 'BlackLittermanModel', 'CLA'],
@@ -258,18 +251,12 @@ class AdvancedLibraryManager:
                     'description': config['description'],
                     'modules_available': config['modules']
                 }
-                
-                # Set session state
-                session_key = f"{lib_name}_available"
-                st.session_state[session_key] = True
-                
+                st.session_state[f"{lib_name}_available"] = True
             except ImportError:
                 lib_status[lib_name] = False
                 missing_libs.append(f"{lib_name} (optional: {config['description']})")
-                session_key = f"{lib_name}_available"
-                st.session_state[session_key] = False
+                st.session_state[f"{lib_name}_available"] = False
         
-        # Deep learning libraries
         dl_libraries = ['tensorflow', 'torch']
         for lib_name in dl_libraries:
             try:
@@ -292,18 +279,15 @@ class EnterpriseLibraryManager:
     
     @staticmethod
     def check_and_import_all():
-        """Check and import all required libraries with ML capabilities."""
         lib_status = {}
         missing_libs = []
         advanced_features = {}
         
-        # First check advanced libraries
         original_status = AdvancedLibraryManager.check_and_import_all()
         lib_status.update(original_status['status'])
         missing_libs.extend([lib for lib in original_status['missing'] if lib not in missing_libs])
         advanced_features.update(original_status['advanced_features'])
         
-        # Alternative data sources
         alt_data_libraries = {
             'alpha_vantage': {
                 'class': 'TimeSeries',
@@ -329,9 +313,8 @@ class EnterpriseLibraryManager:
                 missing_libs.append(f"{lib_name} (optional: {config['description']})")
                 st.session_state[f"{lib_name}_available"] = False
         
-        # Time series forecasting
         try:
-            from prophet import Prophet
+            from prophet import Prophet  # noqa
             lib_status['prophet'] = True
             advanced_features['prophet'] = {
                 'description': 'Time series forecasting',
@@ -342,12 +325,11 @@ class EnterpriseLibraryManager:
             lib_status['prophet'] = False
             missing_libs.append('prophet (optional: Time series forecasting)')
         
-        # Reporting
         try:
-            from reportlab.lib import colors
-            from reportlab.lib.pagesizes import letter
-            from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
-            from reportlab.lib.styles import getSampleStyleSheet
+            from reportlab.lib import colors  # noqa
+            from reportlab.lib.pagesizes import letter  # noqa
+            from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph  # noqa
+            from reportlab.lib.styles import getSampleStyleSheet  # noqa
             lib_status['reportlab'] = True
             advanced_features['reportlab'] = {
                 'description': 'PDF report generation',
@@ -358,9 +340,8 @@ class EnterpriseLibraryManager:
             lib_status['reportlab'] = False
             missing_libs.append('reportlab (optional: PDF generation)')
         
-        # Blockchain
         try:
-            from web3 import Web3
+            from web3 import Web3  # noqa
             lib_status['web3'] = True
             advanced_features['web3'] = {
                 'description': 'Blockchain data access',
@@ -371,9 +352,8 @@ class EnterpriseLibraryManager:
             lib_status['web3'] = False
             missing_libs.append('web3 (optional: Blockchain)')
         
-        # Database
         try:
-            from sqlalchemy import create_engine, text
+            from sqlalchemy import create_engine, text  # noqa
             lib_status['sqlalchemy'] = True
             advanced_features['sqlalchemy'] = {
                 'description': 'Database integration',
@@ -384,9 +364,8 @@ class EnterpriseLibraryManager:
             lib_status['sqlalchemy'] = False
             missing_libs.append('sqlalchemy (optional: Database)')
         
-        # ARCH for GARCH models
         try:
-            from arch import arch_model
+            from arch import arch_model  # noqa
             lib_status['arch'] = True
             advanced_features['arch'] = {
                 'description': 'GARCH volatility models',
@@ -397,9 +376,8 @@ class EnterpriseLibraryManager:
             lib_status['arch'] = False
             missing_libs.append('arch (optional: GARCH models)')
         
-        # XGBoost
         try:
-            import xgboost as xgb
+            import xgboost as xgb  # noqa
             lib_status['xgboost'] = True
             advanced_features['xgboost'] = {
                 'description': 'Gradient boosting',
@@ -428,7 +406,6 @@ class EnterpriseLibraryManager:
 # Initialize enterprise library manager
 @st.cache_resource
 def initialize_library_manager():
-    """Initialize and cache library manager."""
     return EnterpriseLibraryManager.check_and_import_all()
 
 if 'enterprise_library_status' not in st.session_state:
@@ -526,17 +503,12 @@ class AdvancedErrorAnalyzer:
     def __init__(self):
         self.error_history = []
         self.max_history_size = 100
-        # Add recursion prevention flag
         self._is_analyzing_error = False
     
-    # NOTE: This method is NOT decorated with @monitor_operation to prevent recursion
     def analyze_error_with_context(self, error: Exception, context: Dict) -> Dict:
-        """Analyze error with full context for intelligent recovery."""
-        # Check if we're already analyzing an error to prevent recursion
         if self._is_analyzing_error:
             return self._create_simple_error_analysis(error, context)
         
-        # Set flag to prevent recursion
         self._is_analyzing_error = True
         
         try:
@@ -553,7 +525,6 @@ class AdvancedErrorAnalyzer:
                 'error_category': 'UNKNOWN'
             }
             
-            # Analyze error message for patterns
             error_lower = str(error).lower()
             stack_lower = traceback.format_exc().lower()
             
@@ -571,7 +542,6 @@ class AdvancedErrorAnalyzer:
                     
                     analysis['recovery_actions'].extend(pattern['solutions'])
                     
-                    # Add context-specific solutions
                     if 'tickers' in context and pattern_name == 'DATA_FETCH':
                         ticker_count = len(context['tickers'])
                         recommended_count = min(20, max(5, ticker_count // 2))
@@ -584,16 +554,10 @@ class AdvancedErrorAnalyzer:
                             f"Reduce window size from {context['window']} to {min(context['window'], 252)}"
                         )
             
-            # Add ML-powered suggestions based on error history
             analysis['ml_suggestions'] = self._generate_ml_suggestions(error, context)
-            
-            # Calculate confidence score for recovery
             analysis['recovery_confidence'] = min(95, 100 - (analysis['severity_score'] * 10))
-            
-            # Add preventive measures
             analysis['preventive_measures'] = self._generate_preventive_measures(analysis)
             
-            # Store in history
             self.error_history.append(analysis)
             if len(self.error_history) > self.max_history_size:
                 self.error_history.pop(0)
@@ -601,20 +565,17 @@ class AdvancedErrorAnalyzer:
             return analysis
             
         finally:
-            # Always reset the flag
             self._is_analyzing_error = False
     
     def _analyze_error_safely(self, error: Exception, context: Dict) -> Dict:
-        """Safe version of error analysis that never triggers monitoring."""
         return self.analyze_error_with_context(error, context)
     
     def _create_simple_error_analysis(self, error: Exception, context: Dict) -> Dict:
-        """Create a simple error analysis without triggering monitoring."""
         return {
             'timestamp': datetime.now().isoformat(),
             'error_type': type(error).__name__,
-            'error_message': str(error)[:200],  # Limit message length
-            'context': {k: str(v)[:100] for k, v in context.items()},  # Limit context values
+            'error_message': str(error)[:200],
+            'context': {k: str(v)[:100] for k, v in context.items()},
             'stack_trace': 'Stack trace omitted to prevent recursion',
             'severity_score': 5,
             'recovery_actions': ["Fix recursive decorator in monitoring system"],
@@ -622,10 +583,7 @@ class AdvancedErrorAnalyzer:
         }
     
     def _generate_ml_suggestions(self, error: Exception, context: Dict) -> List[str]:
-        """Generate ML-powered recovery suggestions."""
         suggestions = []
-        
-        # Pattern-based suggestions
         error_str = str(error).lower()
         
         if 'singular' in error_str or 'invert' in error_str:
@@ -655,7 +613,6 @@ class AdvancedErrorAnalyzer:
                 "Use data streaming instead of loading all at once"
             ])
         
-        # Context-aware suggestions
         if 'window' in context:
             window = context['window']
             if window > Config.MAX_HISTORICAL_DAYS:
@@ -669,7 +626,6 @@ class AdvancedErrorAnalyzer:
         return suggestions
     
     def _generate_preventive_measures(self, analysis: Dict) -> List[str]:
-        """Generate preventive measures based on error analysis."""
         measures = []
         
         if analysis['error_category'] == 'DATA_FETCH':
@@ -707,44 +663,38 @@ class AdvancedErrorAnalyzer:
         return measures
     
     def create_advanced_error_display(self, analysis: Dict) -> None:
-        """Create advanced error display with interactive elements."""
         with st.expander(f"🔍 Advanced Error Analysis ({analysis['error_type']})", expanded=True):
-            # Error summary
             col1, col2, col3 = st.columns(3)
             with col1:
                 severity_color = {
-                    9: "🔴",  # Critical
-                    7: "🟠",  # High
-                    5: "🟡",  # Medium
-                    3: "🟢"   # Low
+                    9: "🔴",
+                    7: "🟠",
+                    5: "🟡",
+                    3: "🟢"
                 }.get(analysis['severity_score'], "⚫")
                 st.metric("Severity", f"{severity_color} {analysis['severity_score']}/10")
             with col2:
-                st.metric("Recovery Confidence", f"{analysis['recovery_confidence']}%")
+                st.metric("Recovery Confidence", f"{analysis.get('recovery_confidence', 0)}%")
             with col3:
                 category = analysis.get('error_category', 'Unknown')
                 st.metric("Category", category)
             
-            # Recovery actions
-            if analysis['recovery_actions']:
+            if analysis.get('recovery_actions'):
                 st.subheader("🚀 Recovery Actions")
                 for i, action in enumerate(analysis['recovery_actions'][:5], 1):
                     action_key = f"recovery_{i}_{hash(action) % 10000}"
                     st.checkbox(f"Action {i}: {action}", value=False, key=action_key)
             
-            # ML suggestions
-            if analysis['ml_suggestions']:
+            if analysis.get('ml_suggestions'):
                 st.subheader("🤖 AI-Powered Suggestions")
                 for suggestion in analysis['ml_suggestions'][:3]:
                     st.info(f"💡 {suggestion}")
             
-            # Preventive measures
-            if analysis['preventive_measures']:
+            if analysis.get('preventive_measures'):
                 st.subheader("🛡️ Preventive Measures")
                 for measure in analysis['preventive_measures'][:3]:
                     st.success(f"✓ {measure}")
             
-            # Technical details
             with st.expander("🔧 Technical Details"):
                 st.code(f"""
 Error Type: {analysis['error_type']}
@@ -757,7 +707,6 @@ Stack Trace:
                 """)
     
     def get_error_statistics(self) -> Dict:
-        """Get statistics about errors encountered."""
         if not self.error_history:
             return {}
         
@@ -786,44 +735,31 @@ class PerformanceMonitor:
         self.execution_times = []
         self.start_time = time.time()
         self.process = psutil.Process()
-        # Track recursion depth
         self.recursion_depth = {}
     
     def start_operation(self, operation_name: str):
-        """Start timing an operation."""
-        # Initialize recursion tracking for this operation
         if operation_name not in self.recursion_depth:
             self.recursion_depth[operation_name] = 0
         
-        # Check if we're already in this operation
         if self.recursion_depth[operation_name] > 0:
-            # We're already in this operation, increment depth
             self.recursion_depth[operation_name] += 1
-            return  # Don't start a new operation
+            return
         
-        # Start new operation
         self.operations[operation_name] = {
             'start': time.time(),
             'memory_start': self._get_memory_usage(),
             'cpu_start': self._get_cpu_usage(),
             'is_running': True
         }
-        
-        # Set recursion depth to 1
         self.recursion_depth[operation_name] = 1
     
     def end_operation(self, operation_name: str, metadata: Dict = None):
-        """End timing an operation and record metrics."""
         if operation_name in self.operations:
-            # Decrement recursion depth
             if operation_name in self.recursion_depth:
                 self.recursion_depth[operation_name] -= 1
-                
-                # If depth is still > 0, we're still in a recursive call
                 if self.recursion_depth[operation_name] > 0:
-                    return  # Don't end the operation yet
+                    return
             
-            # Actually end the operation
             op = self.operations[operation_name]
             duration = time.time() - op['start']
             memory_end = self._get_memory_usage()
@@ -840,7 +776,6 @@ class PerformanceMonitor:
                 'metadata': metadata
             })
             
-            # Update operation record
             if 'history' not in op:
                 op['history'] = []
             op['history'].append({
@@ -850,30 +785,25 @@ class PerformanceMonitor:
                 'timestamp': datetime.now()
             })
             
-            # Mark as not running
             op['is_running'] = False
             
-            # Clear memory if operation was large
-            if memory_diff > 100:  # More than 100MB increase
+            if memory_diff > 100:
                 gc.collect()
     
     def _get_memory_usage(self) -> float:
-        """Get current memory usage in MB."""
         try:
-            return self.process.memory_info().rss / 1024 / 1024  # Convert to MB
+            return self.process.memory_info().rss / 1024 / 1024
         except Exception:
-            return 0
+            return 0.0
     
     def _get_cpu_usage(self) -> float:
-        """Get current CPU usage percentage."""
         try:
             return self.process.cpu_percent(interval=0.1)
         except Exception:
-            return 0
+            return 0.0
     
     @monitor_operation('get_performance_report')
     def get_performance_report(self) -> Dict:
-        """Generate comprehensive performance report."""
         report = {
             'total_runtime': time.time() - self.start_time,
             'operations': {},
@@ -882,7 +812,6 @@ class PerformanceMonitor:
             'resource_usage': {}
         }
         
-        # Calculate operation statistics
         for op_name, op_data in self.operations.items():
             if 'history' in op_data and op_data['history']:
                 durations = [h['duration'] for h in op_data['history']]
@@ -901,51 +830,44 @@ class PerformanceMonitor:
                     'p95_duration': np.percentile(durations, 95) if len(durations) > 1 else durations[0]
                 }
         
-        # Generate summary
         if report['operations']:
             total_times = [op['total_time'] for op in report['operations'].values()]
             report['summary'] = {
                 'total_operations': len(report['operations']),
-                'total_operation_time': sum(total_times),
-                'slowest_operation': max(report['operations'].items(), 
-                                       key=lambda x: x[1]['avg_duration'])[0],
-                'most_frequent_operation': max(report['operations'].items(),
-                                             key=lambda x: x[1]['count'])[0],
-                'most_memory_intensive': max(report['operations'].items(),
-                                           key=lambda x: x[1]['avg_memory_increase'])[0]
+                'total_operation_time': float(sum(total_times)),
+                'slowest_operation': max(report['operations'].items(), key=lambda x: x[1]['avg_duration'])[0],
+                'most_frequent_operation': max(report['operations'].items(), key=lambda x: x[1]['count'])[0],
+                'most_memory_intensive': max(report['operations'].items(), key=lambda x: x[1]['avg_memory_increase'])[0]
             }
         
-        # Generate resource usage summary
         if self.memory_usage:
             report['resource_usage']['memory'] = {
                 'peak_mb': max(self.memory_usage) if self.memory_usage else 0,
-                'avg_mb': np.mean(self.memory_usage) if self.memory_usage else 0,
+                'avg_mb': float(np.mean(self.memory_usage)) if self.memory_usage else 0,
                 'current_mb': self._get_memory_usage()
             }
         
-        # Generate recommendations
         report['recommendations'] = self._generate_recommendations(report)
         
         return report
     
     def _generate_recommendations(self, report: Dict) -> List[str]:
-        """Generate performance optimization recommendations."""
         recommendations = []
         
-        for op_name, stats in report['operations'].items():
-            if stats['avg_duration'] > 5:  # More than 5 seconds
+        for op_name, stats_dict in report['operations'].items():
+            if stats_dict['avg_duration'] > 5:
                 recommendations.append(
-                    f"Optimize '{op_name}' - average duration {stats['avg_duration']:.1f}s"
+                    f"Optimize '{op_name}' - average duration {stats_dict['avg_duration']:.1f}s"
                 )
             
-            if stats['avg_memory_increase'] > 100:  # More than 100MB
+            if stats_dict['avg_memory_increase'] > 100:
                 recommendations.append(
-                    f"Reduce memory usage in '{op_name}' - average increase {stats['avg_memory_increase']:.1f}MB"
+                    f"Reduce memory usage in '{op_name}' - average increase {stats_dict['avg_memory_increase']:.1f}MB"
                 )
             
-            if stats['avg_cpu_increase'] > 50:  # More than 50% CPU
+            if stats_dict['avg_cpu_increase'] > 50:
                 recommendations.append(
-                    f"Optimize CPU usage in '{op_name}' - average increase {stats['avg_cpu_increase']:.1f}%"
+                    f"Optimize CPU usage in '{op_name}' - average increase {stats_dict['avg_cpu_increase']:.1f}%"
                 )
         
         if report['summary'].get('total_operation_time', 0) > 30:
@@ -961,7 +883,6 @@ class PerformanceMonitor:
         return recommendations
     
     def clear_cache(self):
-        """Clear performance monitoring cache."""
         self.operations.clear()
         self.memory_usage.clear()
         self.execution_times.clear()
@@ -971,8 +892,6 @@ class PerformanceMonitor:
 # Initialize global monitors
 error_analyzer = AdvancedErrorAnalyzer()
 performance_monitor = PerformanceMonitor()
-
-# Store in session state for access by decorators
 st.session_state.error_analyzer = error_analyzer
 st.session_state.performance_monitor = performance_monitor
 
@@ -989,8 +908,6 @@ class AdvancedDataManager:
         self.max_workers = min(Config.MAX_WORKERS, os.cpu_count() or 4)
         self.retry_attempts = Config.RETRY_ATTEMPTS
         self.timeout = Config.DATA_TIMEOUT
-        
-        # Ensure cache directory exists
         Config.ensure_cache_dir()
     
     @monitor_operation('fetch_advanced_market_data')
@@ -1000,17 +917,13 @@ class AdvancedDataManager:
                                   end_date: datetime,
                                   interval: str = '1d',
                                   progress_callback = None) -> Dict:
-        """Fetch advanced market data with multiple features and ensure equal length series."""
         try:
-            # Validate input
             if not tickers:
                 raise ValueError("No tickers provided")
             
-            # Hard upper guard only (we bumped MAX_TICKERS to 150, so 70 is fine)
             if len(tickers) > Config.MAX_TICKERS:
                 raise ValueError(f"Maximum {Config.MAX_TICKERS} tickers allowed, got {len(tickers)}")
             
-            # Check cache first
             cache_key = self._generate_cache_key(tickers, start_date, end_date, interval)
             if Config.CACHE_ENABLED and cache_key in self.cache:
                 cached_data = self.cache[cache_key]
@@ -1031,7 +944,6 @@ class AdvancedDataManager:
                 'successful_tickers': []
             }
             
-            # Download data in parallel with limited workers
             max_workers = min(self.max_workers, len(tickers))
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_to_ticker = {
@@ -1054,7 +966,6 @@ class AdvancedDataManager:
                         ticker_data = future.result(timeout=self.timeout)
                         
                         if ticker_data and not ticker_data['close'].empty:
-                            # Add to data structures
                             close_series = ticker_data['close'].rename(ticker)
                             volume_series = ticker_data['volume'].rename(ticker)
                             high_series = ticker_data['high'].rename(ticker)
@@ -1068,7 +979,6 @@ class AdvancedDataManager:
                                 data['low'] = pd.DataFrame(low_series)
                                 data['open'] = pd.DataFrame(open_series)
                             else:
-                                # Merge with outer join to include all dates
                                 data['prices'] = data['prices'].merge(
                                     close_series, left_index=True, right_index=True, how='outer'
                                 )
@@ -1085,17 +995,14 @@ class AdvancedDataManager:
                                     open_series, left_index=True, right_index=True, how='outer'
                                 )
                             
-                            # Store metadata
                             data['metadata'][ticker] = ticker_data['metadata']
                             
-                            # Store dividends and splits
                             if not ticker_data['dividends'].empty:
                                 data['dividends'][ticker] = ticker_data['dividends']
                             if not ticker_data['splits'].empty:
                                 data['splits'][ticker] = ticker_data['splits']
                             
                             data['successful_tickers'].append(ticker)
-                                
                         else:
                             data['errors'][ticker] = "No OHLC data returned"
                             
@@ -1104,50 +1011,38 @@ class AdvancedDataManager:
                     except Exception as e:
                         data['errors'][ticker] = str(e)
             
-            # Process the data to ensure equal length series
             if not data['prices'].empty:
                 data = self._process_and_align_data(data)
-                
-                # Calculate returns
                 if not data['prices'].empty:
                     data['returns'] = data['prices'].pct_change().dropna()
-                
-                # Calculate additional features
                 if len(data['successful_tickers']) > 0:
                     data['additional_features'] = self._calculate_additional_features(data)
             
-            # Cache the results
             if Config.CACHE_ENABLED and data['successful_tickers']:
                 self.cache[cache_key] = {
                     'data': data,
                     'timestamp': time.time()
                 }
             
-            # Clear memory
             gc.collect()
-            
             return data
             
-        except Exception as e:
-            # Reraise the exception to be handled by the decorator
+        except Exception:
             raise
     
     def _fetch_single_ticker_ohlc(self, ticker: str, 
                                  start_date: datetime, 
                                  end_date: datetime,
                                  interval: str) -> Dict:
-        """Fetch OHLC data for a single ticker with comprehensive error handling."""
         for attempt in range(self.retry_attempts):
             try:
                 stock = yf.Ticker(ticker)
-                
-                # Download historical data with all available fields
                 hist = stock.history(
                     start=start_date,
                     end=end_date,
                     interval=interval,
                     auto_adjust=True,
-                    prepost=False,  # Don't include pre/post market data
+                    prepost=False,
                     actions=True,
                     timeout=self.timeout
                 )
@@ -1155,21 +1050,18 @@ class AdvancedDataManager:
                 if hist.empty:
                     if attempt == self.retry_attempts - 1:
                         raise ValueError(f"No historical data for {ticker} in date range {start_date} to {end_date}")
-                    time.sleep(2 ** attempt)  # Exponential backoff
+                    time.sleep(2 ** attempt)
                     continue
                 
-                # Extract OHLC data
                 close_prices = hist['Close']
                 volumes = hist['Volume']
                 high_prices = hist['High']
                 low_prices = hist['Low']
                 open_prices = hist['Open']
                 
-                # Get dividends and splits
                 dividends = stock.dividends[start_date:end_date]
                 splits = stock.splits[start_date:end_date]
                 
-                # Get comprehensive metadata
                 info = stock.info
                 metadata = {
                     'name': info.get('longName', ticker),
@@ -1210,14 +1102,11 @@ class AdvancedDataManager:
             except Exception as e:
                 if attempt == self.retry_attempts - 1:
                     raise Exception(f"Failed to fetch data for {ticker} after {self.retry_attempts} attempts: {str(e)}")
-                time.sleep(2 ** attempt)  # Exponential backoff
+                time.sleep(2 ** attempt)
         
         return {}
     
     def _process_and_align_data(self, data: Dict) -> Dict:
-        """Process and align data to ensure equal length series with proper forward filling."""
-        
-        # Align all dataframes to have the same index (union of all dates)
         all_dates = pd.DatetimeIndex([])
         for df in [data['prices'], data['volumes'], data['high'], data['low'], data['open']]:
             if not df.empty:
@@ -1226,48 +1115,42 @@ class AdvancedDataManager:
         if len(all_dates) == 0:
             return data
         
-        # Sort dates
         all_dates = all_dates.sort_values()
         
-        # Reindex all dataframes to have the same dates
         for key in ['prices', 'volumes', 'high', 'low', 'open']:
             if not data[key].empty:
-                # Forward fill prices and OHLC data, then backfill
                 data[key] = data[key].reindex(all_dates)
                 
                 if key == 'prices':
-                    # For prices: forward fill, then backfill for initial missing values
                     data[key] = data[key].ffill().bfill()
                 elif key == 'volumes':
-                    # For volumes: forward fill, fill remaining with 0
                     data[key] = data[key].ffill().fillna(0)
                 else:
-                    # For OHLC: forward fill, then backfill
                     data[key] = data[key].ffill().bfill()
         
-        # Remove assets with too many missing values after forward filling
         if not data['prices'].empty:
-            # Count remaining NaN values (should be minimal after forward/back fill)
             nan_counts = data['prices'].isnull().sum()
-            
-            # Remove assets that are still mostly NaN (e.g., newly listed stocks)
             valid_assets = nan_counts[nan_counts < len(data['prices']) * 0.5].index.tolist()
             
             if len(valid_assets) < Config.MIN_ASSETS_FOR_OPTIMIZATION:
-                raise ValueError(f"Only {len(valid_assets)} assets with sufficient data (minimum {Config.MIN_ASSETS_FOR_OPTIMIZATION} required)")
+                # Don't raise here; just leave prices empty to be handled upstream
+                data['prices'] = pd.DataFrame()
+                data['volumes'] = pd.DataFrame()
+                data['high'] = pd.DataFrame()
+                data['low'] = pd.DataFrame()
+                data['open'] = pd.DataFrame()
+                data['successful_tickers'] = []
+                return data
             
-            # Filter all dataframes to only include valid assets
             for key in ['prices', 'volumes', 'high', 'low', 'open']:
                 if not data[key].empty:
                     data[key] = data[key][valid_assets]
             
-            # Update successful tickers
             data['successful_tickers'] = [t for t in data['successful_tickers'] if t in valid_assets]
         
         return data
     
     def _calculate_additional_features(self, data: Dict) -> Dict:
-        """Calculate additional features for analysis."""
         features = {
             'technical_indicators': {},
             'statistical_features': {},
@@ -1282,14 +1165,11 @@ class AdvancedDataManager:
             volumes = data.get('volumes', pd.DataFrame())
             highs = data.get('high', pd.DataFrame())
             lows = data.get('low', pd.DataFrame())
-            opens = data.get('open', pd.DataFrame())
             
-            # Calculate basic statistics for each asset
             for ticker in returns.columns:
                 ticker_returns = returns[ticker].dropna()
                 
                 if len(ticker_returns) > 0:
-                    # Basic statistics
                     features['statistical_features'][ticker] = {
                         'mean_return': ticker_returns.mean(),
                         'std_return': ticker_returns.std(),
@@ -1302,7 +1182,6 @@ class AdvancedDataManager:
                         'cvar_95': self._calculate_cvar(ticker_returns, 0.95)
                     }
                     
-                    # Price-based features
                     if ticker in prices.columns:
                         price_series = prices[ticker].dropna()
                         if len(price_series) > 0:
@@ -1314,7 +1193,6 @@ class AdvancedDataManager:
                                 'high_low_ratio': (highs[ticker].iloc[-1] / lows[ticker].iloc[-1]) if ticker in highs.columns and ticker in lows.columns else 0
                             }
                     
-                    # Volume-based features
                     if ticker in volumes.columns:
                         volume_series = volumes[ticker].dropna()
                         if len(volume_series) > 0:
@@ -1325,23 +1203,19 @@ class AdvancedDataManager:
                                 'volume_std_20d': volume_series.tail(20).std()
                             }
             
-            # Calculate correlation matrix
             if len(returns.columns) > 1:
                 corr_matrix = returns.corr()
                 features['correlation_matrix'] = corr_matrix
-                                
-                # Calculate correlation statistics
                 corr_values = corr_matrix.values[np.triu_indices_from(corr_matrix.values, k=1)]
                 if len(corr_values) > 0:
                     features['correlation_stats'] = {
-                        'mean': np.mean(corr_values),
-                        'median': np.median(corr_values),
-                        'min': np.min(corr_values),
-                        'max': np.max(corr_values),
-                        'std': np.std(corr_values)
+                        'mean': float(np.mean(corr_values)),
+                        'median': float(np.median(corr_values)),
+                        'min': float(np.min(corr_values)),
+                        'max': float(np.max(corr_values)),
+                        'std': float(np.std(corr_values))
                     }
             
-            # Calculate covariance matrix (annualized)
             if not returns.empty:
                 features['covariance_matrix'] = returns.cov() * Config.TRADING_DAYS_PER_YEAR
             
@@ -1351,31 +1225,28 @@ class AdvancedDataManager:
         return features
     
     def _calculate_max_drawdown_series(self, returns: pd.Series) -> float:
-        """Calculate maximum drawdown for a return series."""
         try:
             if len(returns) == 0:
-                return 0
+                return 0.0
             cumulative = (1 + returns).cumprod()
             rolling_max = cumulative.expanding().max()
             drawdown = (cumulative - rolling_max) / rolling_max
-            return drawdown.min() if not drawdown.empty else 0
+            return float(drawdown.min()) if not drawdown.empty else 0.0
         except Exception:
-            return 0
+            return 0.0
     
     def _calculate_cvar(self, returns: pd.Series, confidence: float = 0.95) -> float:
-        """Calculate Conditional Value at Risk (CVaR)."""
         try:
             if len(returns) == 0:
-                return 0
+                return 0.0
             var = -np.percentile(returns, (1 - confidence) * 100)
             cvar_data = returns[returns <= -var]
-            return -cvar_data.mean() if len(cvar_data) > 0 else var
+            return float(-cvar_data.mean()) if len(cvar_data) > 0 else float(var)
         except Exception:
-            return 0
+            return 0.0
     
     def _generate_cache_key(self, tickers: List[str], start_date: datetime, 
                            end_date: datetime, interval: str) -> str:
-        """Generate cache key for data."""
         tickers_str = '_'.join(sorted(tickers))
         date_str = f"{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}"
         return f"{tickers_str}_{date_str}_{interval}"
@@ -1383,7 +1254,6 @@ class AdvancedDataManager:
     def validate_portfolio_data(self, data: Dict, 
                                min_assets: int = Config.MIN_ASSETS_FOR_OPTIMIZATION,
                                min_data_points: int = Config.MIN_DATA_POINTS) -> Dict:
-        """Validate portfolio data for analysis."""
         validation = {
             'is_valid': False,
             'issues': [],
@@ -1393,47 +1263,40 @@ class AdvancedDataManager:
         }
         
         try:
-            # Check if we have prices
             if data['prices'].empty:
                 validation['issues'].append("No price data available")
                 return validation
             
-            # Check number of assets
             n_assets = len(data['prices'].columns)
             if n_assets < min_assets:
                 validation['issues'].append(f"Only {n_assets} assets available, minimum {min_assets} required")
             
-            # Check data points
             n_data_points = len(data['prices'])
             if n_data_points < min_data_points:
                 validation['warnings'].append(f"Only {n_data_points} data points, recommended minimum {min_data_points}")
             
-            # Check for missing values after forward filling
             if not data['prices'].empty:
                 missing_percentage = data['prices'].isnull().mean().mean()
                 if missing_percentage > Config.MAX_MISSING_PERCENTAGE:
                     validation['warnings'].append(f"High percentage of missing values after forward fill: {missing_percentage:.1%}")
+            else:
+                missing_percentage = 0.0
             
-            # Check for zero or negative prices
             if not data['prices'].empty and (data['prices'] <= 0).any().any():
                 problematic_assets = data['prices'].columns[(data['prices'] <= 0).any()].tolist()
                 validation['warnings'].append(f"Zero or negative prices in assets: {problematic_assets}")
             
-            # Check returns calculation
             if data.get('returns', pd.DataFrame()).empty:
                 validation['warnings'].append("Cannot calculate returns - check price data continuity")
             else:
-                # Check for infinite or NaN returns
                 if not np.isfinite(data['returns'].values).all():
                     nan_assets = data['returns'].columns[data['returns'].isnull().any()].tolist()
                     validation['warnings'].append(f"Non-finite values in returns for assets: {nan_assets}")
                 
-                # Check for zero volatility assets
                 zero_vol_assets = data['returns'].std()[data['returns'].std().abs() < 1e-10].tolist()
                 if zero_vol_assets:
                     validation['warnings'].append(f"Zero volatility assets: {zero_vol_assets}")
             
-            # Calculate summary statistics
             validation['summary'] = {
                 'n_assets': n_assets,
                 'n_data_points': n_data_points,
@@ -1441,18 +1304,16 @@ class AdvancedDataManager:
                     'start': data['prices'].index.min(),
                     'end': data['prices'].index.max(),
                     'days': (data['prices'].index.max() - data['prices'].index.min()).days
-                },
-                'missing_data_percentage': missing_percentage if 'missing_percentage' in locals() else 0,
-                'average_return': data['returns'].mean().mean() if not data.get('returns', pd.DataFrame()).empty else 0,
-                'average_volatility': data['returns'].std().mean() * np.sqrt(Config.TRADING_DAYS_PER_YEAR) if not data.get('returns', pd.DataFrame()).empty else 0,
+                } if not data['prices'].empty else {},
+                'missing_data_percentage': float(missing_percentage),
+                'average_return': float(data['returns'].mean().mean()) if not data.get('returns', pd.DataFrame()).empty else 0.0,
+                'average_volatility': float(data['returns'].std().mean() * np.sqrt(Config.TRADING_DAYS_PER_YEAR)) if not data.get('returns', pd.DataFrame()).empty else 0.0,
                 'successful_tickers': len(data.get('successful_tickers', [])),
                 'failed_tickers': len(data.get('errors', {}))
             }
             
-            # Determine if data is valid
             validation['is_valid'] = len(validation['issues']) == 0 and n_assets >= min_assets
             
-            # Provide suggestions
             if not validation['is_valid']:
                 if n_assets < min_assets:
                     validation['suggestions'].append(f"Add {min_assets - n_assets} more assets")
@@ -1470,7 +1331,6 @@ class AdvancedDataManager:
     @monitor_operation('preprocess_data_for_analysis')
     def preprocess_data_for_analysis(self, data: Dict, 
                                      preprocessing_steps: List[str] = None) -> Dict:
-        """Apply preprocessing steps to data."""
         if preprocessing_steps is None:
             preprocessing_steps = ['clean_missing', 'handle_outliers', 'normalize', 'stationarity_check']
         
@@ -1493,35 +1353,28 @@ class AdvancedDataManager:
         return processed_data
     
     def _clean_missing_values(self, data: Dict) -> Dict:
-        """Clean missing values from data."""
         if not data['prices'].empty:
-            # Forward fill, then back fill for any remaining NaNs
             data['prices'] = data['prices'].ffill().bfill()
         
         if not data.get('returns', pd.DataFrame()).empty:
-            # For returns, we can drop rows with too many missing values
-            threshold = 0.5  # Keep rows with at least 50% non-missing values
+            threshold = 0.5
             min_non_na = int(threshold * len(data['returns'].columns))
             data['returns'] = data['returns'].dropna(thresh=min_non_na)
         
         return data
     
     def _handle_outliers(self, data: Dict) -> Dict:
-        """Handle outliers in returns data using winsorization."""
         if not data.get('returns', pd.DataFrame()).empty:
             returns_clean = data['returns'].copy()
             
             for column in returns_clean.columns:
                 series = returns_clean[column].dropna()
                 if len(series) > 10:
-                    # Calculate robust bounds using IQR
                     Q1 = series.quantile(0.25)
                     Q3 = series.quantile(0.75)
                     IQR = Q3 - Q1
                     lower_bound = Q1 - 3 * IQR
                     upper_bound = Q3 + 3 * IQR
-                    
-                    # Winsorize extreme values
                     returns_clean[column] = series.clip(lower_bound, upper_bound)
             
             data['returns'] = returns_clean
@@ -1529,9 +1382,7 @@ class AdvancedDataManager:
         return data
     
     def _normalize_data(self, data: Dict) -> Dict:
-        """Normalize data for analysis."""
         if not data.get('returns', pd.DataFrame()).empty:
-            # Standardize returns (z-score normalization)
             returns_normalized = data['returns'].copy()
             for column in returns_normalized.columns:
                 series = returns_normalized[column]
@@ -1542,21 +1393,19 @@ class AdvancedDataManager:
         return data
     
     def _check_stationarity(self, data: Dict) -> Dict:
-        """Check stationarity of time series."""
         stationarity_results = {}
         
         if not data.get('returns', pd.DataFrame()).empty:
             for column in data['returns'].columns:
                 try:
-                    # Use Augmented Dickey-Fuller test
                     from statsmodels.tsa.stattools import adfuller
                     series = data['returns'][column].dropna()
                     if len(series) > 10:
                         result = adfuller(series, autolag='AIC')
                         stationarity_results[column] = {
-                            'adf_statistic': result[0],
-                            'p_value': result[1],
-                            'is_stationary': result[1] < 0.05,
+                            'adf_statistic': float(result[0]),
+                            'p_value': float(result[1]),
+                            'is_stationary': bool(result[1] < 0.05),
                             'critical_values': result[4],
                             'test_used': 'ADF'
                         }
@@ -1567,7 +1416,6 @@ class AdvancedDataManager:
         return data
     
     def _detrend_data(self, data: Dict) -> Dict:
-        """Remove linear trend from price data."""
         if not data['prices'].empty:
             prices_detrended = data['prices'].copy()
             for column in prices_detrended.columns:
@@ -1584,7 +1432,6 @@ class AdvancedDataManager:
         return data
     
     def _calculate_log_returns(self, data: Dict) -> Dict:
-        """Calculate log returns from prices."""
         if not data['prices'].empty:
             log_returns = np.log(data['prices'] / data['prices'].shift(1)).dropna()
             data['log_returns'] = log_returns
@@ -1593,7 +1440,6 @@ class AdvancedDataManager:
     
     @monitor_operation('calculate_basic_statistics')
     def calculate_basic_statistics(self, data: Dict) -> Dict:
-        """Calculate comprehensive statistics for the dataset."""
         stats_dict = {
             'assets': {},
             'portfolio_level': {},
@@ -1608,106 +1454,109 @@ class AdvancedDataManager:
             prices = data.get('prices', pd.DataFrame())
             volumes = data.get('volumes', pd.DataFrame())
             
-            # Asset-level statistics
             for ticker in returns.columns:
                 ticker_returns = returns[ticker].dropna()
                 
                 if len(ticker_returns) > 0:
                     stats_dict['assets'][ticker] = {
-                        'mean_return': ticker_returns.mean() * Config.TRADING_DAYS_PER_YEAR,
-                        'annual_volatility': ticker_returns.std() * np.sqrt(Config.TRADING_DAYS_PER_YEAR),
-                        'sharpe_ratio': (ticker_returns.mean() * Config.TRADING_DAYS_PER_YEAR) / 
-                                       (ticker_returns.std() * np.sqrt(Config.TRADING_DAYS_PER_YEAR)) 
-                                       if ticker_returns.std() > 0 else 0,
-                        'skewness': ticker_returns.skew(),
-                        'kurtosis': ticker_returns.kurtosis(),
-                        'var_95': -np.percentile(ticker_returns, 5),
-                        'cvar_95': self._calculate_cvar(ticker_returns, 0.95),
-                        'max_drawdown': self._calculate_max_drawdown_series(ticker_returns),
-                        'positive_days': (ticker_returns > 0).sum() / len(ticker_returns),
-                        'data_points': len(ticker_returns),
+                        'mean_return': float(ticker_returns.mean() * Config.TRADING_DAYS_PER_YEAR),
+                        'annual_volatility': float(ticker_returns.std() * np.sqrt(Config.TRADING_DAYS_PER_YEAR)),
+                        'sharpe_ratio': float(
+                            (ticker_returns.mean() * Config.TRADING_DAYS_PER_YEAR) /
+                            (ticker_returns.std() * np.sqrt(Config.TRADING_DAYS_PER_YEAR))
+                        ) if ticker_returns.std() > 0 else 0.0,
+                        'skewness': float(ticker_returns.skew()),
+                        'kurtosis': float(ticker_returns.kurtosis()),
+                        'var_95': float(-np.percentile(ticker_returns, 5)),
+                        'cvar_95': float(self._calculate_cvar(ticker_returns, 0.95)),
+                        'max_drawdown': float(self._calculate_max_drawdown_series(ticker_returns)),
+                        'positive_days': float((ticker_returns > 0).sum() / len(ticker_returns)),
+                        'data_points': int(len(ticker_returns)),
                         'start_date': ticker_returns.index.min() if not ticker_returns.empty else None,
                         'end_date': ticker_returns.index.max() if not ticker_returns.empty else None
                     }
             
-            # Portfolio-level statistics (equal weight benchmark)
             if len(returns.columns) > 0:
                 equal_weights = np.ones(len(returns.columns)) / len(returns.columns)
                 portfolio_returns = returns.dot(equal_weights)
                 
                 stats_dict['portfolio_level'] = {
-                    'mean_return': portfolio_returns.mean() * Config.TRADING_DAYS_PER_YEAR,
-                    'annual_volatility': portfolio_returns.std() * np.sqrt(Config.TRADING_DAYS_PER_YEAR),
-                    'sharpe_ratio': (portfolio_returns.mean() * Config.TRADING_DAYS_PER_YEAR) / 
-                                   (portfolio_returns.std() * np.sqrt(Config.TRADING_DAYS_PER_YEAR)) 
-                                   if portfolio_returns.std() > 0 else 0,
-                    'skewness': portfolio_returns.skew(),
-                    'kurtosis': portfolio_returns.kurtosis(),
-                    'var_95': -np.percentile(portfolio_returns, 5),
-                    'cvar_95': self._calculate_cvar(portfolio_returns, 0.95),
-                    'max_drawdown': self._calculate_max_drawdown_series(portfolio_returns),
-                    'positive_days': (portfolio_returns > 0).sum() / len(portfolio_returns),
-                    'sortino_ratio': self._calculate_sortino_ratio(portfolio_returns),
-                    'calmar_ratio': self._calculate_calmar_ratio(portfolio_returns)
+                    'mean_return': float(portfolio_returns.mean() * Config.TRADING_DAYS_PER_YEAR),
+                    'annual_volatility': float(portfolio_returns.std() * np.sqrt(Config.TRADING_DAYS_PER_YEAR)),
+                    'sharpe_ratio': float(
+                        (portfolio_returns.mean() * Config.TRADING_DAYS_PER_YEAR) /
+                        (portfolio_returns.std() * np.sqrt(Config.TRADING_DAYS_PER_YEAR))
+                    ) if portfolio_returns.std() > 0 else 0.0,
+                    'skewness': float(portfolio_returns.skew()),
+                    'kurtosis': float(portfolio_returns.kurtosis()),
+                    'var_95': float(-np.percentile(portfolio_returns, 5)),
+                    'cvar_95': float(self._calculate_cvar(portfolio_returns, 0.95)),
+                    'max_drawdown': float(self._calculate_max_drawdown_series(portfolio_returns)),
+                    'positive_days': float((portfolio_returns > 0).sum() / len(portfolio_returns)),
+                    'sortino_ratio': float(self._calculate_sortino_ratio(portfolio_returns)),
+                    'calmar_ratio': float(self._calculate_calmar_ratio(portfolio_returns))
                 }
             
-            # Correlation and covariance matrices
             if len(returns.columns) > 1:
                 corr_matrix = returns.corr()
                 stats_dict['correlation']['matrix'] = corr_matrix
-                
-                # Calculate correlation statistics
                 corr_values = corr_matrix.values[np.triu_indices_from(corr_matrix.values, k=1)]
                 if len(corr_values) > 0:
                     stats_dict['correlation']['stats'] = {
-                        'mean': np.mean(corr_values),
-                        'median': np.median(corr_values),
-                        'min': np.min(corr_values),
-                        'max': np.max(corr_values),
-                        'std': np.std(corr_values),
-                        'q25': np.percentile(corr_values, 25),
-                        'q75': np.percentile(corr_values, 75)
+                        'mean': float(np.mean(corr_values)),
+                        'median': float(np.median(corr_values)),
+                        'min': float(np.min(corr_values)),
+                        'max': float(np.max(corr_values)),
+                        'std': float(np.std(corr_values)),
+                        'q25': float(np.percentile(corr_values, 25)),
+                        'q75': float(np.percentile(corr_values, 75))
                     }
                 
-                # Calculate covariance matrix (annualized)
                 cov_matrix = returns.cov() * Config.TRADING_DAYS_PER_YEAR
                 stats_dict['covariance']['matrix'] = cov_matrix
-                stats_dict['covariance']['mean_variance'] = np.diag(cov_matrix).mean()
-                stats_dict['covariance']['avg_covariance'] = cov_matrix.values[np.triu_indices_from(cov_matrix.values, k=1)].mean()
+                stats_dict['covariance']['mean_variance'] = float(np.diag(cov_matrix).mean())
+                stats_dict['covariance']['avg_covariance'] = float(
+                    cov_matrix.values[np.triu_indices_from(cov_matrix.values, k=1)].mean()
+                )
             
-            # Liquidity statistics
             if not volumes.empty:
                 for ticker in volumes.columns:
                     volume_series = volumes[ticker].dropna()
                     if len(volume_series) > 0:
                         stats_dict['liquidity'][ticker] = {
-                            'avg_volume': volume_series.mean(),
-                            'std_volume': volume_series.std(),
-                            'volume_ratio_last_avg': volume_series.iloc[-1] / volume_series.mean() if volume_series.mean() > 0 else 0,
+                            'avg_volume': float(volume_series.mean()),
+                            'std_volume': float(volume_series.std()),
+                            'volume_ratio_last_avg': float(
+                                volume_series.iloc[-1] / volume_series.mean()
+                            ) if volume_series.mean() > 0 else 0.0,
                             'volume_trend': self._calculate_volume_trend(volume_series)
                         }
             
-            # Price level statistics
             if not prices.empty:
                 for ticker in prices.columns:
                     price_series = prices[ticker].dropna()
                     if len(price_series) > 0:
                         stats_dict['price_level'][ticker] = {
-                            'current_price': price_series.iloc[-1],
-                            'price_change_1m': (price_series.iloc[-1] / price_series.iloc[-22] - 1) if len(price_series) > 22 else 0,
-                            'price_change_3m': (price_series.iloc[-1] / price_series.iloc[-66] - 1) if len(price_series) > 66 else 0,
-                            'price_change_1y': (price_series.iloc[-1] / price_series.iloc[-252] - 1) if len(price_series) > 252 else 0,
-                            'price_high_52w': price_series.tail(252).max() if len(price_series) >= 252 else price_series.max(),
-                            'price_low_52w': price_series.tail(252).min() if len(price_series) >= 252 else price_series.min()
+                            'current_price': float(price_series.iloc[-1]),
+                            'price_change_1m': float(
+                                (price_series.iloc[-1] / price_series.iloc[-22] - 1)
+                            ) if len(price_series) > 22 else 0.0,
+                            'price_change_3m': float(
+                                (price_series.iloc[-1] / price_series.iloc[-66] - 1)
+                            ) if len(price_series) > 66 else 0.0,
+                            'price_change_1y': float(
+                                (price_series.iloc[-1] / price_series.iloc[-252] - 1)
+                            ) if len(price_series) > 252 else 0.0,
+                            'price_high_52w': float(price_series.tail(252).max() if len(price_series) >= 252 else price_series.max()),
+                            'price_low_52w': float(price_series.tail(252).min() if len(price_series) >= 252 else price_series.min())
                         }
         
         return stats_dict
     
     def _calculate_sortino_ratio(self, returns: pd.Series, risk_free_rate: float = Config.DEFAULT_RISK_FREE_RATE) -> float:
-        """Calculate Sortino ratio."""
         try:
             if len(returns) == 0:
-                return 0
+                return 0.0
             
             downside_returns = returns[returns < 0]
             if len(downside_returns) == 0:
@@ -1718,27 +1567,23 @@ class AdvancedDataManager:
                 return float('inf')
             
             excess_return = returns.mean() * Config.TRADING_DAYS_PER_YEAR - risk_free_rate
-            return excess_return / downside_std
+            return float(excess_return / downside_std)
         except Exception:
-            return 0
+            return 0.0
     
     def _calculate_calmar_ratio(self, returns: pd.Series) -> float:
-        """Calculate Calmar ratio."""
         try:
             if len(returns) == 0:
-                return 0
-            
+                return 0.0
             max_dd = self._calculate_max_drawdown_series(returns)
             if max_dd == 0:
-                return 0
-            
+                return 0.0
             annual_return = returns.mean() * Config.TRADING_DAYS_PER_YEAR
-            return annual_return / abs(max_dd)
+            return float(annual_return / abs(max_dd))
         except Exception:
-            return 0
+            return 0.0
     
     def _calculate_volume_trend(self, volume_series: pd.Series, window: int = 20) -> str:
-        """Calculate volume trend."""
         try:
             if len(volume_series) < window * 2:
                 return "Insufficient data"
@@ -1768,11 +1613,189 @@ class AdvancedDataManager:
 data_manager = AdvancedDataManager()
 
 # ============================================================================
+# 4. PORTFOLIO OPTIMIZATION HELPERS (EF / HRP / CLA / BLACK-LITTERMAN)
+# ============================================================================
+
+def _calc_max_drawdown(returns: pd.Series) -> float:
+    if len(returns) == 0:
+        return 0.0
+    cumulative = (1 + returns).cumprod()
+    rolling_max = cumulative.expanding().max()
+    drawdown = (cumulative - rolling_max) / rolling_max
+    return float(drawdown.min()) if not drawdown.empty else 0.0
+
+def _calc_cvar(returns: pd.Series, confidence: float = 0.95) -> float:
+    if len(returns) == 0:
+        return 0.0
+    var = -np.percentile(returns, (1 - confidence) * 100)
+    tail = returns[returns <= -var]
+    return float(-tail.mean()) if len(tail) > 0 else float(var)
+
+def compute_portfolio_performance(port_returns: pd.Series,
+                                  risk_free_rate: float = Config.DEFAULT_RISK_FREE_RATE,
+                                  freq: int = Config.TRADING_DAYS_PER_YEAR) -> Dict[str, float]:
+    if len(port_returns) == 0:
+        return {}
+    mu = float(port_returns.mean() * freq)
+    sigma = float(port_returns.std() * np.sqrt(freq))
+    sharpe = float((mu - risk_free_rate) / sigma) if sigma > 0 else 0.0
+    max_dd = _calc_max_drawdown(port_returns)
+    var_95 = float(-np.percentile(port_returns, 5))
+    cvar_95 = _calc_cvar(port_returns, 0.95)
+    return {
+        "annual_return": mu,
+        "annual_vol": sigma,
+        "sharpe": sharpe,
+        "max_drawdown": max_dd,
+        "var_95": var_95,
+        "cvar_95": cvar_95,
+    }
+
+def run_all_portfolio_strategies(prices: pd.DataFrame,
+                                 returns: pd.DataFrame,
+                                 metadata: Dict[str, Dict[str, Any]] = None,
+                                 risk_free_rate: float = Config.DEFAULT_RISK_FREE_RATE):
+    if prices is None or prices.empty:
+        raise ValueError("Prices data is empty")
+    if returns is None or returns.empty:
+        returns = prices.pct_change().dropna()
+    tickers = list(prices.columns)
+    n_assets = len(tickers)
+    if n_assets < 2:
+        raise ValueError("Need at least 2 assets for optimization")
+    
+    strategies: Dict[str, pd.Series] = {}
+    ew_weights = pd.Series(np.ones(n_assets) / n_assets, index=tickers)
+    strategies["Equal Weight"] = ew_weights
+    
+    if PYPFOPT_AVAILABLE:
+        mu = expected_returns.mean_historical_return(prices)
+        S = risk_models.sample_cov(prices)
+        
+        # EF Max Sharpe
+        try:
+            ef = EfficientFrontier(mu, S)
+            ef.max_sharpe(risk_free_rate=risk_free_rate)
+            w = pd.Series(ef.clean_weights())
+            w = w.reindex(tickers).fillna(0.0)
+            strategies["EF Max Sharpe"] = w
+        except Exception as e:
+            logging.error(f"EF Max Sharpe failed: {e}")
+        
+        # EF Min Vol
+        try:
+            ef2 = EfficientFrontier(mu, S)
+            ef2.min_volatility()
+            w2 = pd.Series(ef2.clean_weights())
+            w2 = w2.reindex(tickers).fillna(0.0)
+            strategies["EF Min Volatility"] = w2
+        except Exception as e:
+            logging.error(f"EF Min Vol failed: {e}")
+        
+        # CLA Max Sharpe
+        try:
+            cla = CLA(mu, S)
+            cla.max_sharpe(risk_free_rate=risk_free_rate)
+            w3 = pd.Series(cla.clean_weights())
+            w3 = w3.reindex(tickers).fillna(0.0)
+            strategies["CLA Max Sharpe"] = w3
+        except Exception as e:
+            logging.error(f"CLA failed: {e}")
+        
+        # HRP
+        try:
+            hrp = HRPOpt(returns)
+            w4 = pd.Series(hrp.optimize())
+            w4 = w4.reindex(tickers).fillna(0.0)
+            strategies["HRP"] = w4
+        except Exception as e:
+            logging.error(f"HRP failed: {e}")
+        
+        # Black-Litterman Max Sharpe
+        try:
+            if metadata is None:
+                metadata = {}
+            market_caps = {}
+            for t in tickers:
+                m = metadata.get(t, {})
+                mc = m.get("market_cap", np.nan)
+                market_caps[t] = mc
+            mc_series = pd.Series(market_caps)
+            if mc_series.isnull().all():
+                mc_series.loc[:] = 1.0
+            else:
+                mc_series = mc_series.fillna(mc_series.median())
+            delta = 2.5
+            prior = market_implied_prior_returns(mc_series, S, risk_aversion=delta)
+            bl = BlackLittermanModel(S, pi=prior, absolute=True)
+            bl_ret = bl.bl_returns()
+            bl_cov = bl.bl_cov()
+            ef_bl = EfficientFrontier(bl_ret, bl_cov)
+            ef_bl.max_sharpe(risk_free_rate=risk_free_rate)
+            w5 = pd.Series(ef_bl.clean_weights())
+            w5 = w5.reindex(tickers).fillna(0.0)
+            strategies["Black-Litterman Max Sharpe"] = w5
+        except Exception as e:
+            logging.error(f"Black-Litterman failed: {e}")
+    
+    perf: Dict[str, Dict[str, float]] = {}
+    for name, w in strategies.items():
+        port = returns.dot(w)
+        perf[name] = compute_portfolio_performance(port, risk_free_rate=risk_free_rate)
+    return strategies, perf
+
+# ============================================================================
+# 5. RISK ANALYSIS HELPERS (Hist / Parametric / MC VaR + Relative VaR)
+# ============================================================================
+
+def compute_var_cvar(returns: pd.Series,
+                     confidence: float = 0.95,
+                     horizon_days: int = 1,
+                     method: str = "historical",
+                     n_sim: int = 10000) -> Tuple[float, float]:
+    if len(returns) == 0:
+        raise ValueError("Empty returns for VaR calculation")
+    if horizon_days < 1:
+        horizon_days = 1
+    r = returns.dropna()
+    
+    if method == "historical":
+        scaled = r * np.sqrt(horizon_days)
+        var = -np.percentile(scaled, (1 - confidence) * 100)
+        tail = scaled[scaled <= -var]
+        cvar = -tail.mean() if len(tail) > 0 else var
+    elif method == "parametric":
+        mu = r.mean() * horizon_days
+        sigma = r.std() * np.sqrt(horizon_days)
+        z = norm.ppf(1 - confidence)
+        var = -(mu + sigma * z)
+        cvar = -(mu + sigma * norm.pdf(z) / (1 - confidence))
+    elif method == "monte_carlo":
+        mu = r.mean()
+        sigma = r.std()
+        sim = np.random.normal(mu, sigma, size=n_sim * horizon_days).reshape(-1, horizon_days)
+        sim_horizon = sim.sum(axis=1)
+        var = -np.percentile(sim_horizon, (1 - confidence) * 100)
+        tail = sim_horizon[sim_horizon <= -var]
+        cvar = -tail.mean() if len(tail) > 0 else var
+    else:
+        raise ValueError(f"Unknown VaR method: {method}")
+    return float(var), float(cvar)
+
+def compute_relative_var(port_returns: pd.Series,
+                         bench_returns: pd.Series,
+                         confidence: float = 0.95,
+                         horizon_days: int = 1,
+                         method: str = "historical") -> Tuple[float, float]:
+    common_index = port_returns.index.intersection(bench_returns.index)
+    active = (port_returns.loc[common_index] - bench_returns.loc[common_index]).dropna()
+    return compute_var_cvar(active, confidence=confidence, horizon_days=horizon_days, method=method)
+
+# ============================================================================
 # STREAMLIT APP MAIN FUNCTION
 # ============================================================================
 
 def main():
-    """Main Streamlit application."""
     st.set_page_config(
         page_title="QuantEdge Pro v5.0 - Enterprise Portfolio Analytics",
         page_icon="📈",
@@ -1780,23 +1803,19 @@ def main():
         initial_sidebar_state="expanded"
     )
     
-    # Title and description
     st.title("📈 QuantEdge Pro v5.0 - Enterprise Portfolio Analytics")
     st.markdown("""
-    ### Institutional-grade portfolio optimization, risk analysis, and backtesting platform
+    ### Institutional-grade portfolio optimization, risk analysis, and backtesting platform  
     *Advanced analytics with machine learning, real-time data, and comprehensive reporting*
     """)
     
-    # Sidebar for configuration
     with st.sidebar:
         st.header("⚙️ Configuration")
         
-        # Library status
         if 'enterprise_library_status' in st.session_state:
             lib_status = st.session_state.enterprise_library_status
             st.subheader("📚 Library Status")
             
-            # Show core libraries
             core_libs = ['numpy', 'pandas', 'scipy', 'plotly', 'yfinance', 'streamlit']
             core_status = all(lib_status['status'].get(lib, False) for lib in core_libs)
             
@@ -1808,7 +1827,6 @@ def main():
                     if not lib_status['status'].get(lib, False):
                         st.warning(f"Missing: {lib}")
         
-        # Data configuration
         st.subheader("📊 Data Configuration")
         tickers_input = st.text_area(
             "Enter tickers (comma-separated):",
@@ -1830,23 +1848,18 @@ def main():
                 max_value=datetime.now()
             )
         
-        # Analysis type
         st.subheader("🔍 Analysis Type")
         analysis_type = st.selectbox(
             "Select analysis:",
             ["Portfolio Optimization", "Risk Analysis", "Backtesting", "ML Forecasting", "Comprehensive Report"]
         )
         
-        # Fetch data button
         if st.button("🚀 Fetch Data & Analyze", type="primary"):
             with st.spinner("Fetching market data..."):
                 try:
-                    # Parse tickers
                     tickers = [t.strip().upper() for t in tickers_input.split(',') if t.strip()]
                     
-                    # Fetch data
                     progress_bar = st.progress(0.0)
-                    
                     def update_progress(progress, message):
                         progress_bar.progress(progress)
                         st.sidebar.text(message)
@@ -1858,34 +1871,41 @@ def main():
                         progress_callback=update_progress
                     )
                     
-                    # Store in session state
-                    st.session_state.portfolio_data = data
-                    st.session_state.data_loaded = True
-                    
-                    # Validate data
                     validation = data_manager.validate_portfolio_data(data)
                     
-                    if validation['is_valid']:
+                    if validation['is_valid'] and not data['prices'].empty and len(data.get('successful_tickers', [])) >= 2:
+                        st.session_state.portfolio_data = data
+                        st.session_state.data_loaded = True
                         st.sidebar.success(
                             f"✅ Data loaded: {validation['summary']['n_assets']} assets, "
                             f"{validation['summary']['n_data_points']} days"
                         )
                     else:
-                        st.sidebar.warning(
-                            f"⚠️ Data loaded with issues: "
-                            f"Issues={len(validation['issues'])}, Warnings={len(validation['warnings'])}"
-                        )
-                        
+                        st.session_state.data_loaded = False
+                        st.sidebar.error("❌ Data not sufficient for optimization.")
+                        if validation['issues']:
+                            for issue in validation['issues']:
+                                st.sidebar.error(f"- {issue}")
+                        if validation['warnings']:
+                            for w in validation['warnings']:
+                                st.sidebar.warning(f"- {w}")
+                        if validation['suggestions']:
+                            st.sidebar.info("Suggestions:")
+                            for s in validation['suggestions']:
+                                st.sidebar.info(f"• {s}")
+                
                 except Exception as e:
-                    # Use a simple error display instead of triggering the decorated error analyzer
-                    st.sidebar.error(f"❌ Error fetching data: {str(e)[:200]}...")
+                    st.session_state.data_loaded = False
+                    st.sidebar.error(f"❌ Error fetching data: {str(e)[:100]}...")
                     logging.error(f"Data fetch error: {str(e)}")
     
-    # Main content area
     if st.session_state.get('data_loaded', False) and 'portfolio_data' in st.session_state:
         data = st.session_state.portfolio_data
         
-        # Show data summary
+        if data['prices'].empty:
+            st.warning("No price data available after fetching. Please adjust tickers or date range and try again.")
+            return
+        
         st.subheader("📋 Data Summary")
         col1, col2, col3 = st.columns(3)
         
@@ -1894,60 +1914,347 @@ def main():
         with col2:
             st.metric("Data Points", len(data['prices']))
         with col3:
-            date_range = f"{data['prices'].index[0].date()} to {data['prices'].index[-1].date()}"
+            idx = data['prices'].index
+            if len(idx) > 0:
+                start_str = idx[0].date() if hasattr(idx[0], "date") else str(idx[0])
+                end_str = idx[-1].date() if hasattr(idx[-1], "date") else str(idx[-1])
+                date_range = f"{start_str} to {end_str}"
+            else:
+                date_range = "N/A"
             st.metric("Date Range", date_range)
         
-        # Show data preview
         with st.expander("📊 Data Preview"):
             tab1, tab2, tab3 = st.tabs(["Prices", "Returns", "Statistics"])
             
             with tab1:
                 st.dataframe(data['prices'].tail(10), width="stretch")
-            
             with tab2:
                 if not data['returns'].empty:
                     st.dataframe(data['returns'].tail(10), width="stretch")
-            
+                else:
+                    st.info("Returns are empty; check data continuity.")
             with tab3:
-                stats_dict = data_manager.calculate_basic_statistics(data)
-                if stats_dict['assets']:
-                    # Create a DataFrame for asset statistics
-                    stats_df = pd.DataFrame(stats_dict['assets']).T
-                    st.dataframe(
-                        stats_df[['mean_return', 'annual_volatility', 'sharpe_ratio', 'max_drawdown']],
-                        width="stretch"
-                    )
+                stats_basic = data_manager.calculate_basic_statistics(data)
+                if stats_basic['assets']:
+                    stats_df = pd.DataFrame(stats_basic['assets']).T
+                    view_cols = ['mean_return', 'annual_volatility', 'sharpe_ratio', 'max_drawdown']
+                    view_cols = [c for c in view_cols if c in stats_df.columns]
+                    st.dataframe(stats_df[view_cols], width="stretch")
+                else:
+                    st.info("No asset-level statistics available.")
         
-        # Analysis section based on selected type
+        # =========================
+        # PORTFOLIO OPTIMIZATION
+        # =========================
         if analysis_type == "Portfolio Optimization":
-            st.subheader("🎯 Portfolio Optimization")
-            st.info("Portfolio Optimization engine wiring (EF / HRP / CLA / BL + Equal Weight, Max Sharpe) "
-                    "will plug into this section using the same `portfolio_data` universe.")
-            # TODO: Wire optimization models here using data['returns'] and data['additional_features']
+            st.subheader("🎯 Portfolio Optimization Engine")
             
+            if data['returns'].empty or len(data['prices'].columns) < 2:
+                st.warning("Need at least 2 assets with returns for optimization.")
+            else:
+                rf = st.number_input(
+                    "Risk-free rate (annualized)",
+                    min_value=-0.05,
+                    max_value=0.20,
+                    value=Config.DEFAULT_RISK_FREE_RATE,
+                    step=0.005,
+                    format="%.3f"
+                )
+                
+                st.caption("Strategies: Equal Weight, EF Max Sharpe / Min Vol, CLA Max Sharpe, HRP, Black-Litterman Max Sharpe")
+                
+                try:
+                    strategies, perf = run_all_portfolio_strategies(
+                        data['prices'],
+                        data['returns'],
+                        metadata=data.get('metadata', {}),
+                        risk_free_rate=rf
+                    )
+                except Exception as e:
+                    st.error(f"Optimization failed: {e}")
+                    strategies, perf = {}, {}
+                
+                if not strategies:
+                    st.error("No optimization strategies could be computed.")
+                else:
+                    strategy_names = list(strategies.keys())
+                    
+                    colA, colB = st.columns([2, 3])
+                    with colA:
+                        selected_strategy = st.selectbox(
+                            "Select strategy to inspect:",
+                            strategy_names
+                        )
+                    with colB:
+                        benchmark_strategy = st.selectbox(
+                            "Benchmark strategy (for comparison):",
+                            strategy_names,
+                            index=strategy_names.index("Equal Weight") if "Equal Weight" in strategy_names else 0
+                        )
+                    
+                    # Weights table
+                    st.markdown("#### Portfolio Weights")
+                    w_selected = strategies[selected_strategy]
+                    weights_df = pd.DataFrame({
+                        "Ticker": w_selected.index,
+                        "Weight": w_selected.values
+                    }).sort_values("Weight", ascending=False)
+                    st.dataframe(weights_df, width="stretch")
+                    
+                    # Performance comparison table
+                    st.markdown("#### Strategy Performance (Annualized)")
+                    perf_rows = []
+                    for name, metrics in perf.items():
+                        if metrics:
+                            perf_rows.append({
+                                "Strategy": name,
+                                "Annual Return": metrics["annual_return"],
+                                "Annual Volatility": metrics["annual_vol"],
+                                "Sharpe": metrics["sharpe"],
+                                "Max Drawdown": metrics["max_drawdown"],
+                                "VaR 95% (1d)": metrics["var_95"],
+                                "CVaR 95% (1d)": metrics["cvar_95"],
+                            })
+                    if perf_rows:
+                        perf_df = pd.DataFrame(perf_rows)
+                        st.dataframe(perf_df, width="stretch")
+                    
+                    # Weights bar chart for selected strategy
+                    st.markdown("#### Weight Allocation – Selected Strategy")
+                    fig_w = go.Figure()
+                    fig_w.add_bar(
+                        x=w_selected.index,
+                        y=w_selected.values,
+                        name=selected_strategy
+                    )
+                    fig_w.update_layout(
+                        template="plotly_dark",
+                        height=500,
+                        xaxis_title="Ticker",
+                        yaxis_title="Weight",
+                        showlegend=False
+                    )
+                    st.plotly_chart(fig_w, use_container_width=True)
+                    
+                    # Efficient frontier (if PyPortfolioOpt available)
+                    if PYPFOPT_AVAILABLE and len(data['prices'].columns) >= 2:
+                        try:
+                            st.markdown("#### Efficient Frontier (Sampled)")
+                            prices = data['prices']
+                            mu = expected_returns.mean_historical_return(prices)
+                            S = risk_models.sample_cov(prices)
+                            
+                            ef_front = EfficientFrontier(mu, S)
+                            frontier_x = []
+                            frontier_y = []
+                            for target in np.linspace(mu.min(), mu.max(), 25):
+                                try:
+                                    ef_front = EfficientFrontier(mu, S)
+                                    ef_front.efficient_return(target)
+                                    ret, vol, _ = ef_front.portfolio_performance()
+                                    frontier_x.append(vol)
+                                    frontier_y.append(ret)
+                                except Exception:
+                                    continue
+                            
+                            fig_f = go.Figure()
+                            fig_f.add_scatter(
+                                x=frontier_x,
+                                y=frontier_y,
+                                mode="lines",
+                                name="Efficient Frontier"
+                            )
+                            
+                            # Mark selected strategy point
+                            sel_port = data['returns'].dot(strategies[selected_strategy])
+                            sel_stats = compute_portfolio_performance(sel_port, risk_free_rate=rf)
+                            fig_f.add_scatter(
+                                x=[sel_stats["annual_vol"]],
+                                y=[sel_stats["annual_return"]],
+                                mode="markers",
+                                name=selected_strategy,
+                                marker=dict(size=10)
+                            )
+                            
+                            fig_f.update_layout(
+                                template="plotly_dark",
+                                height=500,
+                                xaxis_title="Volatility (σ)",
+                                yaxis_title="Return (μ)",
+                                legend=dict(orientation="h")
+                            )
+                            st.plotly_chart(fig_f, use_container_width=True)
+                        except Exception as e:
+                            st.info(f"Efficient frontier could not be plotted: {e}")
+        
+        # =========================
+        # RISK ANALYSIS
+        # =========================
         elif analysis_type == "Risk Analysis":
-            st.subheader("⚠️ Risk Analysis")
-            st.info("Risk Analytics (Historical / Parametric / MC VaR + CVaR + Relative VaR vs benchmark) "
-                    "will be implemented here using the loaded universe.")
-            # TODO: Implement VaR / CVaR / Relative VaR here
+            st.subheader("⚠️ Risk Analysis Engine")
             
+            if data['returns'].empty:
+                st.warning("Returns are empty; cannot compute VaR/CVaR. Please refetch data.")
+            else:
+                rf = st.number_input(
+                    "Risk-free rate (annualized, used for Sharpe in background)",
+                    min_value=-0.05,
+                    max_value=0.20,
+                    value=Config.DEFAULT_RISK_FREE_RATE,
+                    step=0.005,
+                    format="%.3f"
+                )
+                
+                returns = data['returns']
+                
+                # Build strategies (same as optimization) to reuse weights
+                try:
+                    strategies, perf = run_all_portfolio_strategies(
+                        data['prices'],
+                        returns,
+                        metadata=data.get('metadata', {}),
+                        risk_free_rate=rf
+                    )
+                except Exception as e:
+                    st.error(f"Failed to build strategies for risk analysis: {e}")
+                    strategies, perf = {}, {}
+                
+                if not strategies:
+                    # fall back: equal weight only
+                    tickers = list(returns.columns)
+                    if len(tickers) >= 2:
+                        ew = pd.Series(np.ones(len(tickers)) / len(tickers), index=tickers)
+                        strategies = {"Equal Weight": ew}
+                    else:
+                        st.error("Not enough assets for risk analysis.")
+                        return
+                
+                strat_names = list(strategies.keys())
+                col_r1, col_r2, col_r3 = st.columns(3)
+                with col_r1:
+                    selected_strategy = st.selectbox(
+                        "Portfolio definition",
+                        strat_names
+                    )
+                with col_r2:
+                    confidence = st.selectbox(
+                        "Confidence level",
+                        Config.CONFIDENCE_LEVELS,
+                        index=Config.CONFIDENCE_LEVELS.index(0.95)
+                    )
+                with col_r3:
+                    horizon_days = st.selectbox(
+                        "Horizon (days)",
+                        [1, 5, 10, 21],
+                        index=0
+                    )
+                
+                benchmark_ticker = st.selectbox(
+                    "Benchmark (for Relative VaR)",
+                    options=list(returns.columns),
+                    index=0
+                )
+                
+                w = strategies[selected_strategy]
+                port_returns = returns.dot(w)
+                bench_returns = returns[benchmark_ticker]
+                
+                # Compute VaR / CVaR
+                var_hist, cvar_hist = compute_var_cvar(
+                    port_returns,
+                    confidence=confidence,
+                    horizon_days=horizon_days,
+                    method="historical"
+                )
+                var_param, cvar_param = compute_var_cvar(
+                    port_returns,
+                    confidence=confidence,
+                    horizon_days=horizon_days,
+                    method="parametric"
+                )
+                var_mc, cvar_mc = compute_var_cvar(
+                    port_returns,
+                    confidence=confidence,
+                    horizon_days=horizon_days,
+                    method="monte_carlo",
+                    n_sim=10000
+                )
+                
+                # Relative VaR vs benchmark (active returns)
+                rel_var_hist, rel_cvar_hist = compute_relative_var(
+                    port_returns,
+                    bench_returns,
+                    confidence=confidence,
+                    horizon_days=horizon_days,
+                    method="historical"
+                )
+                
+                st.markdown("#### VaR / CVaR Summary")
+                risk_rows = [
+                    {
+                        "Method": "Historical",
+                        "VaR": var_hist,
+                        "CVaR": cvar_hist,
+                        "Relative VaR vs Benchmark": rel_var_hist,
+                        "Relative CVaR vs Benchmark": rel_cvar_hist
+                    },
+                    {
+                        "Method": "Parametric (Normal)",
+                        "VaR": var_param,
+                        "CVaR": cvar_param,
+                        "Relative VaR vs Benchmark": np.nan,
+                        "Relative CVaR vs Benchmark": np.nan
+                    },
+                    {
+                        "Method": "Monte Carlo (Normal)",
+                        "VaR": var_mc,
+                        "CVaR": cvar_mc,
+                        "Relative VaR vs Benchmark": np.nan,
+                        "Relative CVaR vs Benchmark": np.nan
+                    }
+                ]
+                risk_df = pd.DataFrame(risk_rows)
+                st.dataframe(risk_df, width="stretch")
+                
+                st.markdown("#### Return Distribution – Historical (Portfolio)")
+                hist_vals = port_returns.dropna()
+                fig_r = go.Figure()
+                fig_r.add_histogram(
+                    x=hist_vals,
+                    nbinsx=60,
+                    name="Portfolio Returns",
+                    histnorm="probability"
+                )
+                # VaR threshold is negative on return axis
+                fig_r.add_vline(
+                    x=-var_hist,
+                    line_dash="dash",
+                    annotation_text=f"VaR {int(confidence*100)}%: {var_hist:.4f}",
+                    annotation_position="top left"
+                )
+                fig_r.update_layout(
+                    template="plotly_dark",
+                    height=500,
+                    xaxis_title="Daily Return",
+                    yaxis_title="Probability",
+                    showlegend=False
+                )
+                st.plotly_chart(fig_r, use_container_width=True)
+        
+        # Other analysis types are placeholders
         elif analysis_type == "Backtesting":
             st.subheader("📈 Backtesting")
-            st.info("Backtest your strategies (equal-weight, factor tilts, etc.) here.")
-            # TODO: Implement backtesting logic
-            
+            st.info("Backtesting engine placeholder – integrate strategy rules and portfolio weights here.")
+        
         elif analysis_type == "ML Forecasting":
             st.subheader("🤖 Machine Learning Forecasting")
-            st.info("Use ML models to forecast returns / volatility for assets in the current universe.")
-            # TODO: Implement ML forecasting
-            
+            st.info("ML forecasting placeholder – plug in sklearn / XGBoost / Prophet models on returns or volatility.")
+        
         elif analysis_type == "Comprehensive Report":
             st.subheader("📄 Comprehensive Report")
-            st.info("Generate institutional-grade PDF / HTML / Excel reports from the current analysis.")
-            # TODO: Implement reporting engine
+            st.info("Comprehensive reporting placeholder – PDF/HTML/Excel export using current portfolio analytics.")
     
     else:
-        # Welcome screen
         st.markdown("""
         ## Welcome to QuantEdge Pro v5.0
         
@@ -1956,22 +2263,21 @@ def main():
         2. **Enter ticker symbols** (e.g., AAPL, GOOGL, MSFT)  
         3. **Select date range** for analysis  
         4. **Choose analysis type**  
-        5. **Click 'Fetch Data & Analyze'** to begin  
+        5. **Click 'Fetch Data & Analyze'** to begin
         
         ### Available Features:
-        - **Portfolio Optimization**: Mean-variance, risk parity, hierarchical risk parity  
-        - **Risk Analysis**: VaR, CVaR, stress testing, backtesting  
-        - **Machine Learning**: Return forecasting, volatility prediction  
-        - **Backtesting**: Strategy testing with realistic assumptions  
-        - **Comprehensive Reporting**: PDF, Excel, and HTML reports  
+        - **Portfolio Optimization**: Mean-variance, risk parity, hierarchical risk parity, Black-Litterman
+        - **Risk Analysis**: Historical / Parametric / MC VaR, CVaR, Relative VaR vs benchmark
+        - **Machine Learning**: Return forecasting, volatility prediction (hooks ready)
+        - **Backtesting**: Strategy testing with realistic assumptions
+        - **Comprehensive Reporting**: PDF, Excel, and HTML reports
         
         ### System Requirements:
-        - Python 3.8+  
-        - 8GB+ RAM recommended  
-        - Internet connection for data fetching  
+        - Python 3.8+
+        - 8GB+ RAM recommended
+        - Internet connection for data fetching
         """)
         
-        # Show system status
         st.subheader("🖥️ System Status")
         col1, col2, col3 = st.columns(3)
         
