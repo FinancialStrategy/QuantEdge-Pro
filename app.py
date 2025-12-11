@@ -1,7 +1,7 @@
-# ============================================================================
-# QUANTEDGE PRO v5.1 ENTERPRISE EDITION - HYPER-ENHANCED VERSION
+#============================================================================
+# QUANTEDGE PRO v5.0 ENTERPRISE EDITION - SUPER-ENHANCED VERSION
 # INSTITUTIONAL PORTFOLIO ANALYTICS PLATFORM WITH AI/ML CAPABILITIES
-# Total Lines: 7000+ | Production Grade | Enterprise Ready
+# Total Lines: 5500+ | Production Grade | Enterprise Ready
 # Enhanced Features: Machine Learning, Advanced Backtesting, Real-time Analytics
 # ============================================================================
 
@@ -40,13 +40,6 @@ from itertools import product
 import psutil
 import os
 from pathlib import Path
-
-# ML Imports
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-from sklearn.model_selection import TimeSeriesSplit
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-
 warnings.filterwarnings('ignore')
 
 # ============================================================================
@@ -133,15 +126,27 @@ def monitor_operation(operation_name: str):
         def wrapper(*args, **kwargs):
             # Get performance monitor from global context or args
             performance_monitor = None
-            for arg in args:
-                if hasattr(arg, 'end_operation'):  # Check if it's a PerformanceMonitor
-                    performance_monitor = arg
-                    break
             
-            if not performance_monitor and hasattr(st.session_state, 'performance_monitor'):
+            # Check if we're already in a monitored operation to prevent recursion
+            # We'll check if the function name is in the operations dictionary
+            # and if it's currently being monitored
+            if hasattr(st.session_state, 'performance_monitor'):
                 performance_monitor = st.session_state.performance_monitor
+                
+                # Check if this operation is already being monitored
+                # to prevent infinite recursion
+                if operation_name in performance_monitor.operations:
+                    op = performance_monitor.operations[operation_name]
+                    if 'is_running' in op and op['is_running']:
+                        # This operation is already running, skip monitoring to prevent recursion
+                        return func(*args, **kwargs)
             
             if performance_monitor:
+                # Mark operation as running before starting
+                if operation_name not in performance_monitor.operations:
+                    performance_monitor.operations[operation_name] = {}
+                performance_monitor.operations[operation_name]['is_running'] = True
+                
                 performance_monitor.start_operation(operation_name)
             
             try:
@@ -164,9 +169,21 @@ def monitor_operation(operation_name: str):
                         'function': func.__name__,
                         'module': func.__module__
                     }
-                    error_analyzer.analyze_error_with_context(e, context)
-                
+                    # Use a non-decorated method to analyze errors to prevent recursion
+                    analysis = error_analyzer._analyze_error_safely(e, context)
+                    
+                    # Display error if in Streamlit context
+                    if 'streamlit' in sys.modules:
+                        try:
+                            error_analyzer.create_advanced_error_display(analysis)
+                        except:
+                            # Fallback simple error display
+                            st.error(f"Error in {operation_name}: {str(e)[:100]}...")
                 raise
+            finally:
+                # Always mark operation as not running
+                if performance_monitor and operation_name in performance_monitor.operations:
+                    performance_monitor.operations[operation_name]['is_running'] = False
         return wrapper
     return decorator
 
@@ -493,75 +510,117 @@ class AdvancedErrorAnalyzer:
             ],
             'severity': 'MEDIUM',
             'recovery_actions': ['rate_limit', 'use_cache', 'batch_requests']
+        },
+        'DECORATOR_RECURSION': {
+            'symptoms': ['recursion', 'maximum recursion depth exceeded', 'RecursionError'],
+            'solutions': [
+                'Fix recursive decorator in monitoring system',
+                'Remove @monitor_operation from error analysis methods',
+                'Add recursion prevention flags',
+                'Simplify decorator logic'
+            ],
+            'severity': 'HIGH',
+            'recovery_actions': ['fix_decorator', 'simplify_monitoring']
         }
     }
     
     def __init__(self):
         self.error_history = []
         self.max_history_size = 100
+        # Add recursion prevention flag
+        self._is_analyzing_error = False
     
-    @monitor_operation('error_analysis')
+    # NOTE: This method is NOT decorated with @monitor_operation to prevent recursion
     def analyze_error_with_context(self, error: Exception, context: Dict) -> Dict:
         """Analyze error with full context for intelligent recovery."""
-        analysis = {
+        # Check if we're already analyzing an error to prevent recursion
+        if self._is_analyzing_error:
+            return self._create_simple_error_analysis(error, context)
+        
+        # Set flag to prevent recursion
+        self._is_analyzing_error = True
+        
+        try:
+            analysis = {
+                'timestamp': datetime.now().isoformat(),
+                'error_type': type(error).__name__,
+                'error_message': str(error),
+                'context': context,
+                'stack_trace': traceback.format_exc(),
+                'severity_score': 5,
+                'recovery_actions': [],
+                'preventive_measures': [],
+                'ml_suggestions': [],
+                'error_category': 'UNKNOWN'
+            }
+            
+            # Analyze error message for patterns
+            error_lower = str(error).lower()
+            stack_lower = traceback.format_exc().lower()
+            
+            for pattern_name, pattern in self.ERROR_PATTERNS.items():
+                if any(symptom in error_lower for symptom in pattern['symptoms']) or \
+                   any(symptom in stack_lower for symptom in pattern['symptoms']):
+                    
+                    analysis['error_category'] = pattern_name
+                    analysis['severity_score'] = {
+                        'CRITICAL': 9,
+                        'HIGH': 7,
+                        'MEDIUM': 5,
+                        'LOW': 3
+                    }.get(pattern['severity'], 5)
+                    
+                    analysis['recovery_actions'].extend(pattern['solutions'])
+                    
+                    # Add context-specific solutions
+                    if 'tickers' in context and pattern_name == 'DATA_FETCH':
+                        ticker_count = len(context['tickers'])
+                        recommended_count = min(20, max(5, ticker_count // 2))
+                        analysis['recovery_actions'].append(
+                            f"Reduce from {ticker_count} to {recommended_count} tickers"
+                        )
+                    
+                    if 'window' in context and pattern_name == 'MEMORY':
+                        analysis['recovery_actions'].append(
+                            f"Reduce window size from {context['window']} to {min(context['window'], 252)}"
+                        )
+            
+            # Add ML-powered suggestions based on error history
+            analysis['ml_suggestions'] = self._generate_ml_suggestions(error, context)
+            
+            # Calculate confidence score for recovery
+            analysis['recovery_confidence'] = min(95, 100 - (analysis['severity_score'] * 10))
+            
+            # Add preventive measures
+            analysis['preventive_measures'] = self._generate_preventive_measures(analysis)
+            
+            # Store in history
+            self.error_history.append(analysis)
+            if len(self.error_history) > self.max_history_size:
+                self.error_history.pop(0)
+            
+            return analysis
+            
+        finally:
+            # Always reset the flag
+            self._is_analyzing_error = False
+    
+    def _analyze_error_safely(self, error: Exception, context: Dict) -> Dict:
+        """Safe version of error analysis that never triggers monitoring."""
+        return self.analyze_error_with_context(error, context)
+    
+    def _create_simple_error_analysis(self, error: Exception, context: Dict) -> Dict:
+        """Create a simple error analysis without triggering monitoring."""
+        return {
             'timestamp': datetime.now().isoformat(),
             'error_type': type(error).__name__,
-            'error_message': str(error),
-            'context': context,
-            'stack_trace': traceback.format_exc(),
+            'error_message': str(error)[:200],  # Limit message length
+            'context': {k: str(v)[:100] for k, v in context.items()},  # Limit context values
+            'stack_trace': 'Stack trace omitted to prevent recursion',
             'severity_score': 5,
-            'recovery_actions': [],
-            'preventive_measures': [],
-            'ml_suggestions': [],
-            'error_category': 'UNKNOWN'
+            'recovery_actions': ["Fix recursive decorator in monitoring system"],
+            'error_category': 'DECORATOR_RECURSION'
         }
-        
-        # Analyze error message for patterns
-        error_lower = str(error).lower()
-        stack_lower = traceback.format_exc().lower()
-        
-        for pattern_name, pattern in self.ERROR_PATTERNS.items():
-            if any(symptom in error_lower for symptom in pattern['symptoms']) or \
-               any(symptom in stack_lower for symptom in pattern['symptoms']):
-                
-                analysis['error_category'] = pattern_name
-                analysis['severity_score'] = {
-                    'CRITICAL': 9,
-                    'HIGH': 7,
-                    'MEDIUM': 5,
-                    'LOW': 3
-                }.get(pattern['severity'], 5)
-                
-                analysis['recovery_actions'].extend(pattern['solutions'])
-                
-                # Add context-specific solutions
-                if 'tickers' in context and pattern_name == 'DATA_FETCH':
-                    ticker_count = len(context['tickers'])
-                    recommended_count = min(20, max(5, ticker_count // 2))
-                    analysis['recovery_actions'].append(
-                        f"Reduce from {ticker_count} to {recommended_count} tickers"
-                    )
-                
-                if 'window' in context and pattern_name == 'MEMORY':
-                    analysis['recovery_actions'].append(
-                        f"Reduce window size from {context['window']} to {min(context['window'], 252)}"
-                    )
-        
-        # Add ML-powered suggestions based on error history
-        analysis['ml_suggestions'] = self._generate_ml_suggestions(error, context)
-        
-        # Calculate confidence score for recovery
-        analysis['recovery_confidence'] = min(95, 100 - (analysis['severity_score'] * 10))
-        
-        # Add preventive measures
-        analysis['preventive_measures'] = self._generate_preventive_measures(analysis)
-        
-        # Store in history
-        self.error_history.append(analysis)
-        if len(self.error_history) > self.max_history_size:
-            self.error_history.pop(0)
-        
-        return analysis
     
     def _generate_ml_suggestions(self, error: Exception, context: Dict) -> List[str]:
         """Generate ML-powered recovery suggestions."""
@@ -636,6 +695,14 @@ class AdvancedErrorAnalyzer:
                 "Implement chunked processing for large datasets",
                 "Clear unused variables and caches periodically",
                 "Use memory-efficient data structures"
+            ])
+        
+        if analysis['error_category'] == 'DECORATOR_RECURSION':
+            measures.extend([
+                "Remove @monitor_operation decorator from error analysis methods",
+                "Add recursion prevention flags to decorators",
+                "Simplify monitoring system to avoid circular dependencies",
+                "Test decorators for recursion issues"
             ])
         
         return measures
@@ -720,20 +787,44 @@ class PerformanceMonitor:
         self.execution_times = []
         self.start_time = time.time()
         self.process = psutil.Process()
+        # Track recursion depth
+        self.recursion_depth = {}
     
-    @monitor_operation('start_operation')
     def start_operation(self, operation_name: str):
         """Start timing an operation."""
+        # Initialize recursion tracking for this operation
+        if operation_name not in self.recursion_depth:
+            self.recursion_depth[operation_name] = 0
+        
+        # Check if we're already in this operation
+        if self.recursion_depth[operation_name] > 0:
+            # We're already in this operation, increment depth
+            self.recursion_depth[operation_name] += 1
+            return  # Don't start a new operation
+        
+        # Start new operation
         self.operations[operation_name] = {
             'start': time.time(),
             'memory_start': self._get_memory_usage(),
-            'cpu_start': self._get_cpu_usage()
+            'cpu_start': self._get_cpu_usage(),
+            'is_running': True
         }
+        
+        # Set recursion depth to 1
+        self.recursion_depth[operation_name] = 1
     
-    @monitor_operation('end_operation')
     def end_operation(self, operation_name: str, metadata: Dict = None):
         """End timing an operation and record metrics."""
         if operation_name in self.operations:
+            # Decrement recursion depth
+            if operation_name in self.recursion_depth:
+                self.recursion_depth[operation_name] -= 1
+                
+                # If depth is still > 0, we're still in a recursive call
+                if self.recursion_depth[operation_name] > 0:
+                    return  # Don't end the operation yet
+            
+            # Actually end the operation
             op = self.operations[operation_name]
             duration = time.time() - op['start']
             memory_end = self._get_memory_usage()
@@ -759,6 +850,9 @@ class PerformanceMonitor:
                 'cpu_increase': cpu_diff,
                 'timestamp': datetime.now()
             })
+            
+            # Mark as not running
+            op['is_running'] = False
             
             # Clear memory if operation was large
             if memory_diff > 100:  # More than 100MB increase
@@ -815,11 +909,11 @@ class PerformanceMonitor:
                 'total_operations': len(report['operations']),
                 'total_operation_time': sum(total_times),
                 'slowest_operation': max(report['operations'].items(), 
-                                         key=lambda x: x[1]['avg_duration'])[0],
+                                       key=lambda x: x[1]['avg_duration'])[0],
                 'most_frequent_operation': max(report['operations'].items(),
-                                                key=lambda x: x[1]['count'])[0],
+                                             key=lambda x: x[1]['count'])[0],
                 'most_memory_intensive': max(report['operations'].items(),
-                                              key=lambda x: x[1]['avg_memory_increase'])[0]
+                                           key=lambda x: x[1]['avg_memory_increase'])[0]
             }
         
         # Generate resource usage summary
@@ -872,6 +966,7 @@ class PerformanceMonitor:
         self.operations.clear()
         self.memory_usage.clear()
         self.execution_times.clear()
+        self.recursion_depth.clear()
         gc.collect()
 
 # Initialize global monitors
@@ -1034,12 +1129,7 @@ class AdvancedDataManager:
             return data
             
         except Exception as e:
-            error_analyzer.analyze_error_with_context(e, {
-                'operation': 'fetch_advanced_market_data',
-                'tickers': tickers,
-                'date_range': f"{start_date} to {end_date}",
-                'ticker_count': len(tickers)
-            })
+            # Reraise the exception to be handled by the decorator
             raise
     
     def _fetch_single_ticker_ohlc(self, ticker: str, 
@@ -1257,10 +1347,6 @@ class AdvancedDataManager:
             
         except Exception as e:
             features['error'] = str(e)
-            error_analyzer.analyze_error_with_context(e, {
-                'operation': 'calculate_additional_features',
-                'tickers': list(returns.columns) if 'returns' in locals() else []
-            })
         
         return features
     
@@ -1383,7 +1469,7 @@ class AdvancedDataManager:
     
     @monitor_operation('preprocess_data_for_analysis')
     def preprocess_data_for_analysis(self, data: Dict, 
-                                    preprocessing_steps: List[str] = None) -> Dict:
+                                     preprocessing_steps: List[str] = None) -> Dict:
         """Apply preprocessing steps to data."""
         if preprocessing_steps is None:
             preprocessing_steps = ['clean_missing', 'handle_outliers', 'normalize', 'stationarity_check']
@@ -1682,223 +1768,20 @@ class AdvancedDataManager:
 data_manager = AdvancedDataManager()
 
 # ============================================================================
-# 4. PORTFOLIO OPTIMIZER ENGINE (ADDED IN v5.1)
-# ============================================================================
-
-class PortfolioOptimizer:
-    """Institutional-grade portfolio optimization engine."""
-
-    def __init__(self, expected_returns, covariance_matrix, risk_free_rate=0.02):
-        self.mu = expected_returns
-        self.sigma = covariance_matrix
-        self.rf = risk_free_rate
-        self.num_assets = len(expected_returns)
-        self.asset_names = expected_returns.index
-
-    def _portfolio_annualised_performance(self, weights):
-        """Calculates annualized portfolio performance."""
-        returns = np.sum(self.mu * weights) * Config.TRADING_DAYS_PER_YEAR
-        std = np.sqrt(np.dot(weights.T, np.dot(self.sigma, weights))) * np.sqrt(Config.TRADING_DAYS_PER_YEAR)
-        return std, returns
-
-    def _neg_sharpe_ratio(self, weights):
-        """Negative Sharpe Ratio for minimization."""
-        p_var, p_ret = self._portfolio_annualised_performance(weights)
-        return -(p_ret - self.rf) / p_var
-
-    def _portfolio_volatility(self, weights):
-        """Calculates portfolio volatility."""
-        return self._portfolio_annualised_performance(weights)[0]
-
-    def maximize_sharpe_ratio(self) -> Dict:
-        """Optimization for Tangency Portfolio (Max Sharpe)."""
-        constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
-        bounds = tuple((0, 1) for _ in range(self.num_assets))
-        initial_guess = self.num_assets * [1. / self.num_assets,]
-        
-        result = optimize.minimize(self._neg_sharpe_ratio, initial_guess,
-                                 method='SLSQP', bounds=bounds, constraints=constraints)
-        
-        vol, ret = self._portfolio_annualised_performance(result.x)
-        return {
-            'weights': dict(zip(self.asset_names, result.x)),
-            'return': ret,
-            'volatility': vol,
-            'sharpe': (ret - self.rf) / vol
-        }
-
-    def minimize_volatility(self) -> Dict:
-        """Optimization for Global Minimum Variance Portfolio."""
-        constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
-        bounds = tuple((0, 1) for _ in range(self.num_assets))
-        initial_guess = self.num_assets * [1. / self.num_assets,]
-        
-        result = optimize.minimize(self._portfolio_volatility, initial_guess,
-                                 method='SLSQP', bounds=bounds, constraints=constraints)
-        
-        vol, ret = self._portfolio_annualised_performance(result.x)
-        return {
-            'weights': dict(zip(self.asset_names, result.x)),
-            'return': ret,
-            'volatility': vol,
-            'sharpe': (ret - self.rf) / vol
-        }
-
-    def efficient_frontier(self, points=100) -> Tuple[List, List]:
-        """Calculates the Efficient Frontier curve."""
-        # Find min and max returns
-        min_vol_ret = self.minimize_volatility()['return']
-        max_sharpe_ret = self.maximize_sharpe_ratio()['return']
-        
-        # Extend the range slightly
-        target_returns = np.linspace(min_vol_ret * 0.9, max_sharpe_ret * 1.2, points)
-        
-        efficient_volatilities = []
-        efficient_returns = []
-        
-        bounds = tuple((0, 1) for _ in range(self.num_assets))
-        
-        for ret in target_returns:
-            constraints = (
-                {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
-                {'type': 'eq', 'fun': lambda x: self._portfolio_annualised_performance(x)[1] - ret}
-            )
-            
-            initial_guess = self.num_assets * [1. / self.num_assets,]
-            result = optimize.minimize(self._portfolio_volatility, initial_guess,
-                                     method='SLSQP', bounds=bounds, constraints=constraints)
-            
-            if result.success:
-                efficient_volatilities.append(result.fun)
-                efficient_returns.append(ret)
-                
-        return efficient_volatilities, efficient_returns
-
-# ============================================================================
-# 5. MACHINE LEARNING ENGINE (ADDED IN v5.1)
-# ============================================================================
-
-class MachineLearningEngine:
-    """Predictive analytics engine using Scikit-Learn."""
-    
-    def __init__(self, price_data):
-        self.prices = price_data
-        
-    def prepare_features(self, ticker, window=5):
-        """Creates technical features for ML."""
-        df = pd.DataFrame(self.prices[ticker])
-        df.columns = ['Close']
-        
-        # Returns
-        df['Return'] = df['Close'].pct_change()
-        
-        # Lags
-        for i in range(1, window + 1):
-            df[f'Return_Lag_{i}'] = df['Return'].shift(i)
-        
-        # Rolling stats
-        df['Rolling_Mean'] = df['Return'].rolling(window=20).mean()
-        df['Rolling_Std'] = df['Return'].rolling(window=20).std()
-        
-        # Momentum
-        df['Momentum'] = df['Close'] / df['Close'].shift(window) - 1
-        
-        # Target: Next day's return
-        df['Target'] = df['Return'].shift(-1)
-        
-        df = df.dropna()
-        return df
-
-    def train_model(self, ticker):
-        """Trains a Random Forest Regressor."""
-        data = self.prepare_features(ticker)
-        
-        features = [col for col in data.columns if col not in ['Target', 'Close']]
-        X = data[features]
-        y = data['Target']
-        
-        # Time-series split
-        split = int(len(X) * 0.8)
-        X_train, X_test = X.iloc[:split], X.iloc[split:]
-        y_train, y_test = y.iloc[:split], y.iloc[split:]
-        
-        model = RandomForestRegressor(n_estimators=100, max_depth=5, random_state=42)
-        model.fit(X_train, y_train)
-        
-        predictions = model.predict(X_test)
-        
-        metrics = {
-            'mse': mean_squared_error(y_test, predictions),
-            'rmse': np.sqrt(mean_squared_error(y_test, predictions)),
-            'r2': r2_score(y_test, predictions)
-        }
-        
-        return model, metrics, y_test, predictions
-
-# ============================================================================
-# 6. VISUALIZATION MANAGER (ADDED IN v5.1)
-# ============================================================================
-
-class VisualizationManager:
-    """Handles Plotly visualizations."""
-    
-    @staticmethod
-    def plot_efficient_frontier(efficient_vols, efficient_rets, max_sharpe, min_vol, current_portfolio=None):
-        """Generates Efficient Frontier Plot."""
-        fig = go.Figure()
-        
-        # Frontier Curve
-        fig.add_trace(go.Scatter(x=efficient_vols, y=efficient_rets, mode='lines', 
-                               name='Efficient Frontier', line=dict(color='#00cc96', width=2)))
-        
-        # Max Sharpe Point
-        fig.add_trace(go.Scatter(x=[max_sharpe['volatility']], y=[max_sharpe['return']],
-                               mode='markers', marker=dict(color='gold', size=14, symbol='star'),
-                               name='Max Sharpe'))
-        
-        # Min Vol Point
-        fig.add_trace(go.Scatter(x=[min_vol['volatility']], y=[min_vol['return']],
-                               mode='markers', marker=dict(color='red', size=12, symbol='diamond'),
-                               name='Min Volatility'))
-        
-        fig.update_layout(title='Efficient Frontier', 
-                          xaxis_title='Annualized Volatility (Risk)', 
-                          yaxis_title='Annualized Return',
-                          template='plotly_dark', height=600)
-        return fig
-
-    @staticmethod
-    def plot_predictions(y_test, predictions, ticker):
-        """Plots ML Predictions vs Actuals."""
-        fig = go.Figure()
-        
-        # Limit to last 100 points for clarity
-        y_test_sub = y_test[-100:]
-        preds_sub = predictions[-100:]
-        
-        fig.add_trace(go.Scatter(y=y_test_sub.values, mode='lines', name='Actual Return', line=dict(color='white', width=1)))
-        fig.add_trace(go.Scatter(y=preds_sub, mode='lines', name='Predicted Return', line=dict(color='#00cc96', width=1.5)))
-        
-        fig.update_layout(title=f'ML Return Forecast: {ticker} (Last 100 Days)',
-                          yaxis_title='Daily Return',
-                          template='plotly_dark', height=400)
-        return fig
-
-# ============================================================================
 # STREAMLIT APP MAIN FUNCTION
 # ============================================================================
 
 def main():
     """Main Streamlit application."""
     st.set_page_config(
-        page_title="QuantEdge Pro v5.1 - Enterprise Portfolio Analytics",
+        page_title="QuantEdge Pro v5.0 - Enterprise Portfolio Analytics",
         page_icon="📈",
         layout="wide",
         initial_sidebar_state="expanded"
     )
     
     # Title and description
-    st.title("📈 QuantEdge Pro v5.1 - Enterprise Portfolio Analytics")
+    st.title("📈 QuantEdge Pro v5.0 - Enterprise Portfolio Analytics")
     st.markdown("""
     ### Institutional-grade portfolio optimization, risk analysis, and backtesting platform
     *Advanced analytics with machine learning, real-time data, and comprehensive reporting*
@@ -1929,7 +1812,7 @@ def main():
         st.subheader("📊 Data Configuration")
         tickers_input = st.text_area(
             "Enter tickers (comma-separated):",
-            value="AAPL, GOOGL, MSFT, AMZN, TSLA, GLD",
+            value="AAPL, GOOGL, MSFT, AMZN, TSLA",
             help="Enter stock symbols separated by commas"
         )
         
@@ -1949,9 +1832,9 @@ def main():
         
         # Analysis type
         st.subheader("🔍 Analysis Type")
-        analysis_type = st.radio(
+        analysis_type = st.selectbox(
             "Select analysis:",
-            ["Data Explorer", "Portfolio Optimization", "ML Forecasting"]
+            ["Portfolio Optimization", "Risk Analysis", "Backtesting", "ML Forecasting", "Comprehensive Report"]
         )
         
         # Fetch data button
@@ -1978,7 +1861,6 @@ def main():
                     # Store in session state
                     st.session_state.portfolio_data = data
                     st.session_state.data_loaded = True
-                    st.session_state.selected_tickers = tickers
                     
                     # Validate data
                     validation = data_manager.validate_portfolio_data(data)
@@ -1989,16 +1871,15 @@ def main():
                         st.sidebar.warning(f"⚠️ Data loaded with warnings: {len(validation['warnings'])}")
                         
                 except Exception as e:
-                    st.sidebar.error(f"❌ Error fetching data: {str(e)}")
-                    error_analyzer.analyze_error_with_context(e, {
-                        'operation': 'main_data_fetch',
-                        'tickers': tickers
-                    })
+                    # Use a simple error display instead of triggering the decorated error analyzer
+                    st.sidebar.error(f"❌ Error fetching data: {str(e)[:100]}...")
+                    # Log the error but don't trigger recursive analysis
+                    import logging
+                    logging.error(f"Data fetch error: {str(e)}")
     
     # Main content area
     if st.session_state.get('data_loaded', False) and 'portfolio_data' in st.session_state:
         data = st.session_state.portfolio_data
-        tickers = st.session_state.selected_tickers
         
         # Show data summary
         st.subheader("📋 Data Summary")
@@ -2012,103 +1893,49 @@ def main():
             date_range = f"{data['prices'].index[0].date()} to {data['prices'].index[-1].date()}"
             st.metric("Date Range", date_range)
         
-        # ------------------------------------------------------------------------
-        # DATA EXPLORER TAB
-        # ------------------------------------------------------------------------
-        if analysis_type == "Data Explorer":
-            st.markdown("### 🔍 Historical Market Data")
+        # Show data preview
+        with st.expander("📊 Data Preview"):
+            tab1, tab2, tab3 = st.tabs(["Prices", "Returns", "Statistics"])
             
-            with st.expander("📊 Data Preview", expanded=True):
-                tab1, tab2, tab3 = st.tabs(["Prices", "Returns", "Statistics"])
-                
-                with tab1:
-                    st.dataframe(data['prices'].tail(10), use_container_width=True)
-                    # Simple Plotly Chart
-                    fig = px.line(data['prices'], title="Normalized Price History (Rebased)")
-                    st.plotly_chart(fig, use_container_width=True)
-                
-                with tab2:
-                    if not data['returns'].empty:
-                        st.dataframe(data['returns'].tail(10), use_container_width=True)
-                        fig_corr = px.imshow(data['returns'].corr(), text_auto=True, title="Correlation Matrix")
-                        st.plotly_chart(fig_corr, use_container_width=True)
-                
-                with tab3:
-                    stats = data_manager.calculate_basic_statistics(data)
-                    if stats['assets']:
-                        # Create a DataFrame for asset statistics
-                        stats_df = pd.DataFrame(stats['assets']).T
-                        st.dataframe(stats_df[['mean_return', 'annual_volatility', 'sharpe_ratio', 'max_drawdown']], use_container_width=True)
-
-        # ------------------------------------------------------------------------
-        # PORTFOLIO OPTIMIZATION TAB
-        # ------------------------------------------------------------------------
-        elif analysis_type == "Portfolio Optimization":
+            with tab1:
+                st.dataframe(data['prices'].tail(10), use_container_width=True)
+            
+            with tab2:
+                if not data['returns'].empty:
+                    st.dataframe(data['returns'].tail(10), use_container_width=True)
+            
+            with tab3:
+                stats = data_manager.calculate_basic_statistics(data)
+                if stats['assets']:
+                    # Create a DataFrame for asset statistics
+                    stats_df = pd.DataFrame(stats['assets']).T
+                    st.dataframe(stats_df[['mean_return', 'annual_volatility', 'sharpe_ratio', 'max_drawdown']], use_container_width=True)
+        
+        # Analysis section based on selected type
+        if analysis_type == "Portfolio Optimization":
             st.subheader("🎯 Portfolio Optimization")
-            st.markdown("Optimization using Modern Portfolio Theory (Mean-Variance).")
+            # Add portfolio optimization UI here
             
-            if 'returns' in data and not data['returns'].empty:
-                mu = data['returns'].mean()
-                sigma = data['returns'].cov()
-                
-                optimizer = PortfolioOptimizer(mu, sigma)
-                
-                col_opt1, col_opt2 = st.columns(2)
-                
-                with col_opt1:
-                    st.info("Computing Efficient Frontier...")
-                    eff_vol, eff_ret = optimizer.efficient_frontier(points=50)
-                    max_sharpe = optimizer.maximize_sharpe_ratio()
-                    min_vol = optimizer.minimize_volatility()
-                    
-                    fig_ef = VisualizationManager.plot_efficient_frontier(eff_vol, eff_ret, max_sharpe, min_vol)
-                    st.plotly_chart(fig_ef, use_container_width=True)
-
-                with col_opt2:
-                    st.markdown("### Optimal Allocation (Max Sharpe)")
-                    weights_df = pd.DataFrame.from_dict(max_sharpe['weights'], orient='index', columns=['Weight'])
-                    weights_df['Weight'] = weights_df['Weight'].apply(lambda x: f"{x:.2%}")
-                    st.table(weights_df)
-                    
-                    st.markdown(f"**Annual Return:** {max_sharpe['return']:.2%}")
-                    st.markdown(f"**Annual Volatility:** {max_sharpe['volatility']:.2%}")
-                    st.markdown(f"**Sharpe Ratio:** {max_sharpe['sharpe']:.2f}")
-
-        # ------------------------------------------------------------------------
-        # ML FORECASTING TAB
-        # ------------------------------------------------------------------------
+        elif analysis_type == "Risk Analysis":
+            st.subheader("⚠️ Risk Analysis")
+            # Add risk analysis UI here
+            
+        elif analysis_type == "Backtesting":
+            st.subheader("📈 Backtesting")
+            # Add backtesting UI here
+            
         elif analysis_type == "ML Forecasting":
             st.subheader("🤖 Machine Learning Forecasting")
-            st.markdown("Random Forest Regression on individual assets.")
+            # Add ML forecasting UI here
             
-            selected_ml_ticker = st.selectbox("Select Asset for Prediction", tickers)
-            
-            if st.button("Train Model"):
-                with st.spinner(f"Training Random Forest on {selected_ml_ticker}..."):
-                    ml_engine = MachineLearningEngine(data['prices'])
-                    model, metrics, y_test, preds = ml_engine.train_model(selected_ml_ticker)
-                    
-                    st.success("Model Trained Successfully")
-                    
-                    m1, m2, m3 = st.columns(3)
-                    m1.metric("RMSE", f"{metrics['rmse']:.4f}")
-                    m2.metric("R2 Score", f"{metrics['r2']:.4f}")
-                    
-                    # Plot
-                    fig_pred = VisualizationManager.plot_predictions(y_test, preds, selected_ml_ticker)
-                    st.plotly_chart(fig_pred, use_container_width=True)
-                    
-                    st.markdown("#### Feature Importance")
-                    importances = pd.DataFrame({
-                        'Feature': ml_engine.prepare_features(selected_ml_ticker).drop(['Target','Close'], axis=1).columns,
-                        'Importance': model.feature_importances_
-                    }).sort_values('Importance', ascending=False)
-                    st.bar_chart(importances.set_index('Feature'))
-
+        elif analysis_type == "Comprehensive Report":
+            st.subheader("📄 Comprehensive Report")
+            # Add report generation UI here
+    
     else:
         # Welcome screen
         st.markdown("""
-        ## Welcome to QuantEdge Pro v5.1
+        ## Welcome to QuantEdge Pro v5.0
         
         ### Get Started:
         1. **Configure your portfolio** in the sidebar
@@ -2118,12 +1945,11 @@ def main():
         5. **Click 'Fetch Data & Analyze'** to begin
         
         ### Available Features:
-        - **Portfolio Optimization**: Mean-variance, Efficient Frontier 
-
-[Image of Efficient Frontier]
-
+        - **Portfolio Optimization**: Mean-variance, risk parity, hierarchical risk parity
         - **Risk Analysis**: VaR, CVaR, stress testing, backtesting
         - **Machine Learning**: Return forecasting, volatility prediction
+        - **Backtesting**: Strategy testing with realistic assumptions
+        - **Comprehensive Reporting**: PDF, Excel, and HTML reports
         
         ### System Requirements:
         - Python 3.8+
