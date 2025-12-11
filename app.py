@@ -14,6 +14,264 @@ warnings.filterwarnings("ignore")
 
 
 # =========================
+# Advanced Error & Performance Monitor (ported-lite)
+# =========================
+
+import json
+import traceback
+import sys
+import psutil
+import gc
+import time
+
+class AdvancedErrorAnalyzer:
+    """Advanced error analysis with categorized patterns and rich Streamlit display."""
+
+    ERROR_PATTERNS = {
+        "DATA_FETCH": {
+            "symptoms": ["yahoo", "timeout", "connection", "404", "403", "502", "503", "No data fetched"],
+            "solutions": [
+                "Check ticker spelling (e.g. use .IS for BIST, .T for Tokyo, .KS for Korea).",
+                "Try a shorter date range.",
+                "Reduce number of tickers in one request.",
+                "Check internet / firewall restrictions.",
+                "Fall back to a smaller subset (e.g. only US core, then add Asia)."
+            ],
+            "severity": "HIGH",
+        },
+        "OPTIMIZATION": {
+            "symptoms": ["singular", "convergence", "infeasible", "not positive definite"],
+            "solutions": [
+                "Use fewer highly‑correlated assets.",
+                "Switch to HRP (more robust) instead of classical EF.",
+                "Increase lookback window length.",
+                "Clean NaN / Inf values in returns."
+            ],
+            "severity": "MEDIUM",
+        },
+        "NUMERICAL": {
+            "symptoms": ["nan", "inf", "divide", "overflow"],
+            "solutions": [
+                "Remove assets with zero or near‑zero volatility.",
+                "Clip extreme daily returns (winsorization).",
+                "Add a small epsilon to denominators when needed."
+            ],
+            "severity": "MEDIUM",
+        },
+        "MEMORY": {
+            "symptoms": ["MemoryError", "exceeded", "out of memory"],
+            "solutions": [
+                "Reduce number of simulations.",
+                "Reduce number of assets or shorten lookback window.",
+                "Use chunked processing and call gc.collect() more often."
+            ],
+            "severity": "CRITICAL",
+        },
+    }
+
+    def __init__(self):
+        self.error_history = []
+        self.max_history_size = 100
+        self._is_analyzing = False
+
+    def analyze_error_with_context(self, error, context):
+        """Safe analysis – never raises, returns a dict."""
+        if self._is_analyzing:
+            # Prevent recursion
+            return {
+                "error_type": type(error).__name__,
+                "error_message": str(error)[:200],
+                "context": {k: str(v) for k, v in context.items()},
+                "stack_trace": "Suppressed (recursive call)",
+                "error_category": "UNKNOWN",
+                "severity_score": 5,
+                "recovery_actions": ["Check logs for root cause."],
+                "recovery_confidence": 60,
+            }
+
+        self._is_analyzing = True
+        try:
+            msg = str(error)
+            stack = traceback.format_exc()
+            category = "UNKNOWN"
+            pattern_cfg = None
+
+            low_msg = msg.lower()
+            low_stack = stack.lower()
+
+            for name, cfg in self.ERROR_PATTERNS.items():
+                if any(sym.lower() in low_msg or sym.lower() in low_stack for sym in cfg["symptoms"]):
+                    category = name
+                    pattern_cfg = cfg
+                    break
+
+            severity_map = {"CRITICAL": 9, "HIGH": 7, "MEDIUM": 5, "LOW": 3}
+            severity_score = severity_map.get(pattern_cfg["severity"] if pattern_cfg else "MEDIUM", 5)
+
+            recovery_actions = []
+            if pattern_cfg:
+                recovery_actions.extend(pattern_cfg["solutions"])
+
+            # Context‑aware hints
+            if "tickers" in context:
+                try:
+                    n = len(context["tickers"])
+                    if n > 50:
+                        recovery_actions.append(f"Reduce universe from {n} to ~40–50 tickers and retry.")
+                except Exception:
+                    pass
+
+            analysis = {
+                "timestamp": datetime.now().isoformat(),
+                "error_type": type(error).__name__,
+                "error_message": msg,
+                "context": context,
+                "stack_trace": stack,
+                "error_category": category,
+                "severity_score": severity_score,
+                "recovery_actions": recovery_actions,
+                "recovery_confidence": max(40, 100 - severity_score * 8),
+            }
+
+            self.error_history.append(analysis)
+            if len(self.error_history) > self.max_history_size:
+                self.error_history.pop(0)
+
+            return analysis
+        finally:
+            self._is_analyzing = False
+
+    def create_advanced_error_display(self, analysis):
+        """Pretty Streamlit panel for the given analysis dict."""
+        with st.expander(f"🔍 Advanced Error Analysis – {analysis.get('error_type', 'Error')}", expanded=True):
+            col1, col2, col3 = st.columns(3)
+            sev = analysis.get("severity_score", 5)
+            severity_color = "🟡"
+            if sev >= 9:
+                severity_color = "🔴"
+            elif sev >= 7:
+                severity_color = "🟠"
+            elif sev <= 3:
+                severity_color = "🟢"
+            with col1:
+                st.metric("Severity", f"{severity_color} {sev}/10")
+            with col2:
+                st.metric("Recovery Confidence", f"{analysis.get('recovery_confidence', 60)}%")
+            with col3:
+                st.metric("Category", analysis.get("error_category", "UNKNOWN"))
+
+            if analysis.get("recovery_actions"):
+                st.subheader("🚀 Suggested Recovery Actions")
+                for i, act in enumerate(analysis["recovery_actions"], 1):
+                    st.write(f"**{i}.** {act}")
+
+            with st.expander("🔧 Technical Details"):
+                st.code(
+                    json.dumps(
+                        {
+                            "error_type": analysis.get("error_type"),
+                            "message": analysis.get("error_message"),
+                            "context": analysis.get("context"),
+                        },
+                        default=str,
+                        indent=2,
+                    )
+                )
+                st.text("Stack Trace:")
+                st.code(analysis.get("stack_trace", "")[:4000])
+
+
+class PerformanceMonitor:
+    """Lightweight operation timing + memory tracking."""
+
+    def __init__(self):
+        self.operations = {}
+        self.process = psutil.Process()
+
+    def start_operation(self, name: str):
+        self.operations.setdefault(name, {"history": []})
+        self.operations[name]["_current"] = {
+            "t0": time.time(),
+            "mem0": self._mem_mb(),
+        }
+
+    def end_operation(self, name: str):
+        op = self.operations.get(name, {})
+        cur = op.get("_current")
+        if not cur:
+            return
+        duration = time.time() - cur["t0"]
+        mem_inc = self._mem_mb() - cur["mem0"]
+        op["history"].append({"duration": duration, "mem_inc": mem_inc, "ts": datetime.now()})
+        op["_current"] = None
+
+    def _mem_mb(self) -> float:
+        try:
+            return self.process.memory_info().rss / 1024 / 1024
+        except Exception:
+            return 0.0
+
+    def get_report(self):
+        report = {}
+        for name, op in self.operations.items():
+            hist = op.get("history", [])
+            if not hist:
+                continue
+            durs = [h["duration"] for h in hist]
+            mems = [h["mem_inc"] for h in hist]
+            report[name] = {
+                "count": len(hist),
+                "avg_duration": float(np.mean(durs)),
+                "max_duration": float(np.max(durs)),
+                "avg_mem_inc": float(np.mean(mems)),
+            }
+        return report
+
+
+def monitor_operation(operation_name: str):
+    """Decorator to time functions and record into PerformanceMonitor."""
+
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            pm = st.session_state.get("performance_monitor")
+            if pm is not None:
+                pm.start_operation(operation_name)
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                # Try to route through AdvancedErrorAnalyzer if available
+                ea = st.session_state.get("error_analyzer")
+                context = {"operation": operation_name, "function": func.__name__}
+                try:
+                    if ea is not None:
+                        analysis = ea.analyze_error_with_context(e, context)
+                        ea.create_advanced_error_display(analysis)
+                    else:
+                        st.error(f"Error in {operation_name}: {e}")
+                except Exception:
+                    # Failsafe – never crash from the monitor itself
+                    st.error(f"Error in {operation_name}: {e}")
+                raise
+            finally:
+                if pm is not None:
+                    pm.end_operation(operation_name)
+        return wrapper
+
+    return decorator
+
+
+# Create global instances (cached in session_state)
+if "error_analyzer" not in st.session_state:
+    st.session_state["error_analyzer"] = AdvancedErrorAnalyzer()
+if "performance_monitor" not in st.session_state:
+    st.session_state["performance_monitor"] = PerformanceMonitor()
+error_analyzer = st.session_state["error_analyzer"]
+performance_monitor = st.session_state["performance_monitor"]
+
+
+
+
+# =========================
 # Config
 # =========================
 class Config:
@@ -22,6 +280,7 @@ class Config:
     MAX_TICKERS = 150
     YF_BATCH_SIZE = 50
     MC_SIMULATIONS = 10000
+    MAX_HISTORICAL_DAYS = 365 * 10
 
 
 # =========================
@@ -194,6 +453,7 @@ def _download_batch(tickers, start, end):
     return closes
 
 
+@monitor_operation("fetch_price_data")
 def fetch_price_data(tickers, start_date, end_date):
     tickers = [t.strip().upper() for t in tickers if t.strip()]
     tickers = sorted(list(dict.fromkeys(tickers)))  # dedupe while preserving order
@@ -288,6 +548,7 @@ def compute_beta(portfolio_returns, benchmark_returns):
     return cov / var_b
 
 
+@monitor_operation("compute_risk_profile")
 def compute_risk_profile(portfolio_returns, benchmark_returns, alpha=0.95):
     if portfolio_returns.empty:
         return {}
@@ -337,6 +598,7 @@ except Exception:
     HAS_PYPORT = False
 
 
+@monitor_operation("run_optimizations")
 def run_optimizations(prices, returns, benchmark_returns):
     strategies = {}
     if prices.empty:
@@ -607,7 +869,7 @@ def main():
         )
         analysis_type = st.selectbox(
             "Main Tab",
-            ["Portfolio Optimization", "Risk Analysis", "Data Preview"],
+            ["Portfolio Optimization", "Risk Analysis", "Data Preview", "Backtesting", "ML Forecasting"],
         )
         run_button = st.button("🚀 Fetch Data & Run Analysis", type="primary")
 
@@ -703,15 +965,14 @@ def main():
     elif analysis_type == "Portfolio Optimization":
         st.subheader("🎯 Portfolio Optimization (EF / HRP / CLA / BL + Equal-Weight)")
 
+    elif analysis_type == "Backtesting":
+        st.subheader("🧪 Backtesting – Strategy Performance on Historical Sample")
+
         if not strategies:
             st.warning("No optimization results found. Please run analysis from the sidebar.")
             return
 
         strat_names = list(strategies.keys())
-        if not strat_names:
-            st.warning("No optimization strategies were successfully computed.")
-            return
-
         default_idx = 0
         if (
             "active_strategy" in st.session_state
@@ -719,42 +980,176 @@ def main():
         ):
             default_idx = strat_names.index(st.session_state["active_strategy"])
 
-        selected_name = st.selectbox("Select Strategy", strat_names, index=default_idx)
+        selected_name = st.selectbox("Select Strategy to Backtest", strat_names, index=default_idx)
         st.session_state["active_strategy"] = selected_name
         strat = strategies[selected_name]
+        port_ret = strat["returns"]
 
-        col1, col2 = st.columns([2, 3])
-        with col1:
-            plot_weights_bar(strat["weights"], f"Weights – {selected_name}")
-        with col2:
-            plot_cumulative_returns(
-                strat["returns"], f"Cumulative Returns – {selected_name}"
+        if port_ret is None or port_ret.empty:
+            st.warning("Selected strategy has no return series to backtest.")
+        else:
+            initial_capital = st.number_input(
+                "Initial Capital", min_value=10_000, max_value=10_000_000, value=1_000_000, step=50_000
             )
 
-        strategy_factsheet_panel(selected_name, strat, benchmark_ticker)
+            equity = (1 + port_ret).cumprod() * initial_capital
+            dd = (equity / equity.cummax() - 1.0)
 
-        # Table of all strategies
-        st.markdown("### 🧮 Strategy Comparison Table")
-        rows = []
-        for name, s in strategies.items():
-            r = s["risk"]
-            rows.append(
-                {
-                    "Strategy": name,
-                    "Annual Return %": r["annual_return"] * 100,
-                    "Annual Vol %": r["annual_vol"] * 100,
-                    "Sharpe": r["sharpe"],
-                    "Max Drawdown %": r["max_drawdown"] * 100,
-                    "Hist VaR 95%": r["hist_var"] * 100,
-                    "Hist CVaR 95%": r["hist_cvar"] * 100,
-                    "Rel VaR 95% vs Bench": r["rel_var"] * 100
-                    if r["rel_var"] is not None
-                    else np.nan,
-                    "Beta vs Bench": r["beta"],
-                }
+            total_return = equity.iloc[-1] / equity.iloc[0] - 1.0 if len(equity) > 1 else 0.0
+            ann_ret = port_ret.mean() * Config.TRADING_DAYS_PER_YEAR
+            ann_vol = port_ret.std() * np.sqrt(Config.TRADING_DAYS_PER_YEAR)
+            sharpe = (ann_ret - Config.RISK_FREE_RATE) / ann_vol if ann_vol > 0 else np.nan
+            max_dd = dd.min()
+
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Total Return", f"{total_return*100:.2f}%")
+            c2.metric("Annual Return", f"{ann_ret*100:.2f}%")
+            c3.metric("Annual Volatility", f"{ann_vol*100:.2f}%")
+            c4.metric("Max Drawdown", f"{max_dd*100:.2f}%")
+
+            st.markdown("### 📈 Equity Curve")
+            fig_eq = go.Figure()
+            fig_eq.add_trace(
+                go.Scatter(x=equity.index, y=equity.values, mode="lines", name="Equity")
             )
-        df = pd.DataFrame(rows)
-        st.dataframe(df, width="stretch")
+            fig_eq.update_layout(
+                template="plotly_dark",
+                xaxis_title="Date",
+                yaxis_title="Equity",
+            )
+            st.plotly_chart(fig_eq, width="stretch")
+
+            st.markdown("### 📉 Drawdown")
+            fig_dd = go.Figure()
+            fig_dd.add_trace(
+                go.Scatter(x=dd.index, y=dd.values, mode="lines", name="Drawdown")
+            )
+            fig_dd.update_layout(
+                template="plotly_dark",
+                xaxis_title="Date",
+                yaxis_title="Drawdown",
+            )
+            st.plotly_chart(fig_dd, width="stretch")
+
+            # Monthly returns table
+            st.markdown("### 📅 Monthly Returns")
+            monthly = (1 + port_ret).resample("M").prod() - 1
+            if not monthly.empty:
+                df_month = monthly.to_frame(name="Return")
+                df_month.index = df_month.index.to_period("M").astype(str)
+                st.dataframe(df_month.tail(24), width="stretch")
+            else:
+                st.info("Not enough data for monthly aggregation.")
+
+    elif analysis_type == "ML Forecasting":
+        st.subheader("🤖 ML / Statistical Forecasting – Scenario Paths")
+
+        target_mode = st.radio(
+            "Forecast target",
+            ["Single Asset", "Optimized Strategy"],
+            index=0,
+            horizontal=True,
+        )
+
+        if target_mode == "Single Asset":
+            asset = st.selectbox("Select Asset", list(prices.columns))
+            series = prices[asset].dropna()
+            ret_series = series.pct_change().dropna()
+        else:
+            if not strategies:
+                st.warning("No optimization results found. Please run analysis from the sidebar.")
+                return
+            strat_names = list(strategies.keys())
+            default_idx = 0
+            if (
+                "active_strategy" in st.session_state
+                and st.session_state["active_strategy"] in strat_names
+            ):
+                default_idx = strat_names.index(st.session_state["active_strategy"])
+            selected_name = st.selectbox("Select Strategy", strat_names, index=default_idx)
+            st.session_state["active_strategy"] = selected_name
+            strat = strategies[selected_name]
+            ret_series = strat["returns"].dropna()
+            series = (1 + ret_series).cumprod()
+
+        if ret_series is None or ret_series.empty:
+            st.warning("Not enough data to build a forecasting model.")
+        else:
+            horizon = st.slider("Forecast Horizon (days)", 5, 90, 21, 1)
+            n_scenarios = st.slider("Number of Scenarios", 50, 500, 200, 50)
+
+            # Simple AR(1)-style regression on returns
+            r = ret_series.copy()
+            X = r.shift(1).dropna()
+            y = r.loc[X.index]
+            if len(X) < 10:
+                st.warning("Too little data for AR(1) regression – falling back to iid Gaussian.")
+                mu = r.mean()
+                sigma = r.std()
+                phi = 0.0
+                intercept = mu
+                resid_std = sigma
+            else:
+                coef = np.polyfit(X.values, y.values, 1)
+                phi = coef[0]
+                intercept = coef[1]
+                fitted = intercept + phi * X.values
+                resid = y.values - fitted
+                resid_std = np.std(resid)
+                mu = r.mean()
+                sigma = r.std()
+
+            last_r = r.iloc[-1]
+            p0 = series.iloc[-1]
+
+            paths = np.zeros((n_scenarios, horizon))
+            for i in range(n_scenarios):
+                rt = last_r
+                for h in range(horizon):
+                    eps = np.random.normal(0, resid_std if resid_std > 0 else sigma)
+                    rt = intercept + phi * rt + eps
+                    paths[i, h] = rt
+
+            price_paths = np.zeros_like(paths)
+            price_paths[:, 0] = p0 * (1 + paths[:, 0])
+            for h in range(1, horizon):
+                price_paths[:, h] = price_paths[:, h - 1] * (1 + paths[:, h])
+
+            dates_future = pd.date_range(series.index[-1] + timedelta(days=1), periods=horizon, freq="B")
+            q5 = np.percentile(price_paths, 5, axis=0)
+            q50 = np.percentile(price_paths, 50, axis=0)
+            q95 = np.percentile(price_paths, 95, axis=0)
+
+            st.markdown("### 📈 Forecast Price Scenarios (Median + 5–95% Band)")
+            fig_fc = go.Figure()
+            fig_fc.add_trace(
+                go.Scatter(x=dates_future, y=q5, mode="lines", name="5th percentile")
+            )
+            fig_fc.add_trace(
+                go.Scatter(
+                    x=dates_future,
+                    y=q95,
+                    mode="lines",
+                    name="95th percentile",
+                    fill="tonexty",
+                )
+            )
+            fig_fc.add_trace(
+                go.Scatter(x=dates_future, y=q50, mode="lines", name="Median Forecast")
+            )
+            fig_fc.update_layout(
+                template="plotly_dark",
+                xaxis_title="Date",
+                yaxis_title="Price Level",
+            )
+            st.plotly_chart(fig_fc, width="stretch")
+
+            exp_ret = (q50[-1] / p0 - 1.0) if p0 > 0 else np.nan
+            st.markdown("### 📊 Forecast Summary")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Expected Horizon Return", f"{exp_ret*100:.2f}%")
+            c2.metric("Input Mean Daily Return", f"{mu*100:.3f}%")
+            c3.metric("Input Daily Volatility", f"{sigma*100:.3f}%")
 
     elif analysis_type == "Risk Analysis":
         st.subheader("⚠️ Risk Analysis – Hist / Parametric / MC VaR + CVaR + Relative VaR")
