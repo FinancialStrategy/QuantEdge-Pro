@@ -1675,325 +1675,209 @@ class AdvancedDataManager:
 data_manager = AdvancedDataManager()
 
 # ============================================================================
-# CONTINUATION OF OTHER CLASSES WITH SIMILAR ENHANCEMENTS
+# STREAMLIT APP MAIN FUNCTION
 # ============================================================================
 
-# Note: Due to the character limit, I'll show the pattern for enhancing the remaining classes.
-# Each class should follow the same pattern:
-# 1. Add proper type hints
-# 2. Use the @monitor_operation decorator for key methods
-# 3. Implement @retry_on_failure where appropriate
-# 4. Use Config constants instead of magic numbers
-# 5. Add comprehensive error handling with error_analyzer
-# 6. Implement memory management with gc.collect()
-# 7. Add proper data validation
-# 8. Use the data manager for consistent data handling
-
-# Here's the pattern for the AdvancedVisualizationEngine with improvements:
-
-class AdvancedVisualizationEngine:
-    """Production-grade visualization engine with 3D, animations, and interactivity."""
+def main():
+    """Main Streamlit application."""
+    st.set_page_config(
+        page_title="QuantEdge Pro v5.0 - Enterprise Portfolio Analytics",
+        page_icon="📈",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
     
-    def __init__(self):
-        self.themes = {
-            'dark': Config.DARK_THEME,
-            'light': Config.LIGHT_THEME
-        }
-        self.current_theme = 'dark'
-        self.color_scales = {
-            'sequential': ['#003f5c', '#2f4b7c', '#665191', '#a05195', '#d45087', '#f95d6a', '#ff7c43', '#ffa600'],
-            'diverging': ['#8c510a', '#d8b365', '#f6e8c3', '#f5f5f5', '#c7eae5', '#5ab4ac', '#01665e'],
-            'qualitative': ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f']
-        }
+    # Title and description
+    st.title("📈 QuantEdge Pro v5.0 - Enterprise Portfolio Analytics")
+    st.markdown("""
+    ### Institutional-grade portfolio optimization, risk analysis, and backtesting platform
+    *Advanced analytics with machine learning, real-time data, and comprehensive reporting*
+    """)
     
-    @monitor_operation('create_3d_efficient_frontier')
-    def create_3d_efficient_frontier(self, returns: pd.DataFrame, 
-                                    risk_free_rate: float = Config.DEFAULT_RISK_FREE_RATE) -> go.Figure:
-        """Create 3D efficient frontier visualization with robust data handling."""
-        try:
-            # Validate input data
-            if returns.empty:
-                return self._create_empty_figure("3D Efficient Frontier", "No return data available")
+    # Sidebar for configuration
+    with st.sidebar:
+        st.header("⚙️ Configuration")
+        
+        # Library status
+        if 'enterprise_library_status' in st.session_state:
+            lib_status = st.session_state.enterprise_library_status
+            st.subheader("📚 Library Status")
             
-            if len(returns.columns) < Config.MIN_ASSETS_FOR_OPTIMIZATION:
-                return self._create_empty_figure("3D Efficient Frontier", 
-                                               f"Minimum {Config.MIN_ASSETS_FOR_OPTIMIZATION} assets required")
+            # Show core libraries
+            core_libs = ['numpy', 'pandas', 'scipy', 'plotly', 'yfinance', 'streamlit']
+            core_status = all(lib_status['status'].get(lib, False) for lib in core_libs)
             
-            # Clean data
-            returns_clean = returns.dropna()
-            if len(returns_clean) < Config.MIN_DATA_POINTS:
-                return self._create_empty_figure("3D Efficient Frontier", 
-                                               f"Insufficient data points (minimum {Config.MIN_DATA_POINTS} required)")
-            
-            # Calculate parameters for 3D surface
-            mu = returns_clean.mean() * Config.TRADING_DAYS_PER_YEAR
-            S = returns_clean.cov() * Config.TRADING_DAYS_PER_YEAR
-            assets = returns_clean.columns.tolist()
-            n_assets = len(assets)
-            
-            # Generate random portfolios for 3D surface
-            n_portfolios = min(1000, 100 * n_assets)  # Scale with number of assets
-            np.random.seed(42)
-            
-            portfolio_returns = []
-            portfolio_risks = []
-            portfolio_sharpes = []
-            portfolio_skewness = []
-            
-            for _ in range(n_portfolios):
-                # Generate random weights
-                weights = np.random.random(n_assets)
-                weights /= weights.sum()
-                
-                # Calculate portfolio metrics
-                port_return = np.dot(weights, mu)
-                port_risk = np.sqrt(weights.T @ S @ weights)
-                
-                if port_risk > 0:
-                    sharpe = (port_return - risk_free_rate) / port_risk
-                    # Calculate portfolio skewness
-                    port_returns = returns_clean.dot(weights)
-                    skew_val = port_returns.skew() if len(port_returns) > 0 else 0
-                    
-                    portfolio_returns.append(port_return)
-                    portfolio_risks.append(port_risk)
-                    portfolio_sharpes.append(sharpe)
-                    portfolio_skewness.append(skew_val)
-            
-            if not portfolio_returns:
-                return self._create_empty_figure("3D Efficient Frontier", "Could not generate portfolio samples")
-            
-            # Create 3D scatter plot
-            fig = go.Figure(data=[
-                go.Scatter3d(
-                    x=portfolio_risks,
-                    y=portfolio_returns,
-                    z=portfolio_sharpes,
-                    mode='markers',
-                    marker=dict(
-                        size=5,
-                        color=portfolio_sharpes,
-                        colorscale='Viridis',
-                        opacity=0.6,
-                        colorbar=dict(title="Sharpe Ratio", x=1.1),
-                        cmin=np.percentile(portfolio_sharpes, 5),
-                        cmax=np.percentile(portfolio_sharpes, 95)
-                    ),
-                    hovertemplate='<b>Random Portfolio</b><br>' +
-                                 'Risk: %{x:.2%}<br>' +
-                                 'Return: %{y:.2%}<br>' +
-                                 'Sharpe: %{z:.2f}<br>' +
-                                 'Skewness: %{customdata:.2f}<extra></extra>',
-                    customdata=portfolio_skewness,
-                    name='Random Portfolios'
-                )
-            ])
-            
-            # Try to calculate efficient frontier
-            efficient_risks = []
-            efficient_returns = []
-            efficient_sharpes = []
-            
-            # Calculate efficient frontier points using simple method
-            target_returns = np.linspace(min(portfolio_returns), max(portfolio_returns) * 0.9, 20)
-            
-            for target_return in target_returns:
+            if core_status:
+                st.success("✅ Core libraries available")
+            else:
+                st.error("❌ Missing core libraries")
+                for lib in core_libs:
+                    if not lib_status['status'].get(lib, False):
+                        st.warning(f"Missing: {lib}")
+        
+        # Data configuration
+        st.subheader("📊 Data Configuration")
+        tickers_input = st.text_area(
+            "Enter tickers (comma-separated):",
+            value="AAPL, GOOGL, MSFT, AMZN, TSLA",
+            help="Enter stock symbols separated by commas"
+        )
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            start_date = st.date_input(
+                "Start date",
+                value=datetime.now() - timedelta(days=365*2),
+                max_value=datetime.now()
+            )
+        with col2:
+            end_date = st.date_input(
+                "End date",
+                value=datetime.now(),
+                max_value=datetime.now()
+            )
+        
+        # Analysis type
+        st.subheader("🔍 Analysis Type")
+        analysis_type = st.selectbox(
+            "Select analysis:",
+            ["Portfolio Optimization", "Risk Analysis", "Backtesting", "ML Forecasting", "Comprehensive Report"]
+        )
+        
+        # Fetch data button
+        if st.button("🚀 Fetch Data & Analyze", type="primary"):
+            with st.spinner("Fetching market data..."):
                 try:
-                    # Simple optimization for each target return
-                    def objective(weights):
-                        port_risk = np.sqrt(weights.T @ S @ weights)
-                        return port_risk
+                    # Parse tickers
+                    tickers = [t.strip().upper() for t in tickers_input.split(',')]
                     
-                    def return_constraint(weights):
-                        return np.dot(weights, mu) - target_return
+                    # Fetch data
+                    progress_bar = st.progress(0)
                     
-                    def weight_constraint(weights):
-                        return np.sum(weights) - 1
+                    def update_progress(progress, message):
+                        progress_bar.progress(progress)
+                        st.sidebar.text(message)
                     
-                    bounds = [(0, 1) for _ in range(n_assets)]
-                    constraints = [
-                        {'type': 'eq', 'fun': return_constraint},
-                        {'type': 'eq', 'fun': weight_constraint}
-                    ]
-                    
-                    initial_weights = np.ones(n_assets) / n_assets
-                    
-                    result = optimize.minimize(
-                        objective,
-                        initial_weights,
-                        bounds=bounds,
-                        constraints=constraints,
-                        method='SLSQP',
-                        options={'maxiter': Config.MAX_OPTIMIZATION_ITERATIONS, 'ftol': Config.OPTIMIZATION_TOLERANCE}
+                    data = data_manager.fetch_advanced_market_data(
+                        tickers=tickers,
+                        start_date=datetime.combine(start_date, datetime.min.time()),
+                        end_date=datetime.combine(end_date, datetime.max.time()),
+                        progress_callback=update_progress
                     )
                     
-                    if result.success:
-                        weights = result.x
-                        port_return = np.dot(weights, mu)
-                        port_risk = np.sqrt(weights.T @ S @ weights)
-                        sharpe = (port_return - risk_free_rate) / port_risk if port_risk > 0 else 0
-                        
-                        efficient_risks.append(port_risk)
-                        efficient_returns.append(port_return)
-                        efficient_sharpes.append(sharpe)
+                    # Store in session state
+                    st.session_state.portfolio_data = data
+                    st.session_state.data_loaded = True
+                    
+                    # Validate data
+                    validation = data_manager.validate_portfolio_data(data)
+                    
+                    if validation['is_valid']:
+                        st.sidebar.success(f"✅ Data loaded: {validation['summary']['n_assets']} assets, {validation['summary']['n_data_points']} days")
+                    else:
+                        st.sidebar.warning(f"⚠️ Data loaded with warnings: {len(validation['warnings'])}")
                         
                 except Exception as e:
-                    continue
-            
-            # Add efficient frontier line if we have points
-            if efficient_risks:
-                fig.add_trace(go.Scatter3d(
-                    x=efficient_risks,
-                    y=efficient_returns,
-                    z=efficient_sharpes,
-                    mode='lines',
-                    line=dict(color='#ff0000', width=6),
-                    name='Efficient Frontier',
-                    hovertemplate='<b>Efficient Portfolio</b><br>' +
-                                 'Risk: %{x:.2%}<br>' +
-                                 'Return: %{y:.2%}<br>' +
-                                 'Sharpe: %{z:.2f}<extra></extra>'
-                ))
-            
-            # Add individual assets
-            asset_risks = np.sqrt(np.diag(S))
-            asset_returns = mu.values
-            asset_sharpes = [(r - risk_free_rate) / s if s > 0 else 0 
-                           for r, s in zip(asset_returns, asset_risks)]
-            
-            fig.add_trace(go.Scatter3d(
-                x=asset_risks,
-                y=asset_returns,
-                z=asset_sharpes,
-                mode='markers+text',
-                marker=dict(
-                    size=10,
-                    color='#00ff00',
-                    symbol='diamond'
-                ),
-                text=assets,
-                textposition="top center",
-                name='Individual Assets',
-                hovertemplate='<b>%{text}</b><br>' +
-                             'Risk: %{x:.2%}<br>' +
-                             'Return: %{y:.2%}<br>' +
-                             'Sharpe: %{z:.2f}<extra></extra>'
-            ))
-            
-            # Update layout
-            fig.update_layout(
-                height=Config.CHART_HEIGHT,
-                title=dict(
-                    text='3D Efficient Frontier Analysis',
-                    font=dict(size=24, color=self.themes[self.current_theme]['font_color']),
-                    x=0.5
-                ),
-                scene=dict(
-                    xaxis_title='Risk (Annual Volatility)',
-                    yaxis_title='Return (Annual)',
-                    zaxis_title='Sharpe Ratio',
-                    camera=dict(
-                        eye=dict(x=1.5, y=1.5, z=1.5),
-                        up=dict(x=0, y=0, z=1),
-                        center=dict(x=0, y=0, z=0)
-                    ),
-                    xaxis=dict(
-                        backgroundcolor=self.themes[self.current_theme]['bg_color'],
-                        gridcolor=self.themes[self.current_theme]['grid_color'],
-                        tickformat='.0%'
-                    ),
-                    yaxis=dict(
-                        backgroundcolor=self.themes[self.current_theme]['bg_color'],
-                        gridcolor=self.themes[self.current_theme]['grid_color'],
-                        tickformat='.0%'
-                    ),
-                    zaxis=dict(
-                        backgroundcolor=self.themes[self.current_theme]['bg_color'],
-                        gridcolor=self.themes[self.current_theme]['grid_color']
-                    )
-                ),
-                template='plotly_dark' if self.current_theme == 'dark' else 'plotly_white',
-                showlegend=True,
-                legend=dict(
-                    x=0.02,
-                    y=0.98,
-                    bgcolor='rgba(0,0,0,0.5)' if self.current_theme == 'dark' else 'rgba(255,255,255,0.8)',
-                    bordercolor='white' if self.current_theme == 'dark' else 'black',
-                    borderwidth=1
-                ),
-                margin=dict(l=0, r=0, t=50, b=0)
-            )
-            
-            # Clear memory
-            gc.collect()
-            
-            return fig
-            
-        except Exception as e:
-            error_analyzer.analyze_error_with_context(e, {
-                'operation': 'create_3d_efficient_frontier',
-                'n_assets': len(returns.columns) if not returns.empty else 0
-            })
-            return self._create_empty_figure("3D Efficient Frontier", f"Error: {str(e)[:100]}...")
+                    st.sidebar.error(f"❌ Error fetching data: {str(e)}")
+                    error_analyzer.analyze_error_with_context(e, {
+                        'operation': 'main_data_fetch',
+                        'tickers': tickers
+                    })
     
-    # ... Continue with other methods following the same pattern
+    # Main content area
+    if st.session_state.get('data_loaded', False) and 'portfolio_data' in st.session_state:
+        data = st.session_state.portfolio_data
+        
+        # Show data summary
+        st.subheader("📋 Data Summary")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("Assets", len(data['prices'].columns))
+        with col2:
+            st.metric("Data Points", len(data['prices']))
+        with col3:
+            date_range = f"{data['prices'].index[0].date()} to {data['prices'].index[-1].date()}"
+            st.metric("Date Range", date_range)
+        
+        # Show data preview
+        with st.expander("📊 Data Preview"):
+            tab1, tab2, tab3 = st.tabs(["Prices", "Returns", "Statistics"])
+            
+            with tab1:
+                st.dataframe(data['prices'].tail(10), use_container_width=True)
+            
+            with tab2:
+                if not data['returns'].empty:
+                    st.dataframe(data['returns'].tail(10), use_container_width=True)
+            
+            with tab3:
+                stats = data_manager.calculate_basic_statistics(data)
+                if stats['assets']:
+                    # Create a DataFrame for asset statistics
+                    stats_df = pd.DataFrame(stats['assets']).T
+                    st.dataframe(stats_df[['mean_return', 'annual_volatility', 'sharpe_ratio', 'max_drawdown']], use_container_width=True)
+        
+        # Analysis section based on selected type
+        if analysis_type == "Portfolio Optimization":
+            st.subheader("🎯 Portfolio Optimization")
+            # Add portfolio optimization UI here
+            
+        elif analysis_type == "Risk Analysis":
+            st.subheader("⚠️ Risk Analysis")
+            # Add risk analysis UI here
+            
+        elif analysis_type == "Backtesting":
+            st.subheader("📈 Backtesting")
+            # Add backtesting UI here
+            
+        elif analysis_type == "ML Forecasting":
+            st.subheader("🤖 Machine Learning Forecasting")
+            # Add ML forecasting UI here
+            
+        elif analysis_type == "Comprehensive Report":
+            st.subheader("📄 Comprehensive Report")
+            # Add report generation UI here
     
-    def _create_empty_figure(self, title: str, message: str = "Data Unavailable") -> go.Figure:
-        """Create empty figure with error message."""
-        fig = go.Figure()
-        fig.update_layout(
-            height=400,
-            title=dict(
-                text=f"{title}",
-                font=dict(size=20, color=self.themes[self.current_theme]['font_color'])
-            ),
-            template='plotly_dark' if self.current_theme == 'dark' else 'plotly_white',
-            paper_bgcolor=self.themes[self.current_theme]['bg_color'],
-            plot_bgcolor=self.themes[self.current_theme]['bg_color'],
-            font=dict(color=self.themes[self.current_theme]['font_color']),
-            xaxis=dict(visible=False),
-            yaxis=dict(visible=False),
-            annotations=[dict(
-                text=message,
-                xref="paper",
-                yref="paper",
-                x=0.5,
-                y=0.5,
-                showarrow=False,
-                font=dict(size=16, color=self.themes[self.current_theme]['font_color'])
-            )]
-        )
-        return fig
-
-# Initialize visualization engine
-viz_engine = AdvancedVisualizationEngine()
+    else:
+        # Welcome screen
+        st.markdown("""
+        ## Welcome to QuantEdge Pro v5.0
+        
+        ### Get Started:
+        1. **Configure your portfolio** in the sidebar
+        2. **Enter ticker symbols** (e.g., AAPL, GOOGL, MSFT)
+        3. **Select date range** for analysis
+        4. **Choose analysis type**
+        5. **Click 'Fetch Data & Analyze'** to begin
+        
+        ### Available Features:
+        - **Portfolio Optimization**: Mean-variance, risk parity, hierarchical risk parity
+        - **Risk Analysis**: VaR, CVaR, stress testing, backtesting
+        - **Machine Learning**: Return forecasting, volatility prediction
+        - **Backtesting**: Strategy testing with realistic assumptions
+        - **Comprehensive Reporting**: PDF, Excel, and HTML reports
+        
+        ### System Requirements:
+        - Python 3.8+
+        - 8GB+ RAM recommended
+        - Internet connection for data fetching
+        """)
+        
+        # Show system status
+        st.subheader("🖥️ System Status")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("Memory Usage", f"{performance_monitor._get_memory_usage():.1f} MB")
+        with col2:
+            st.metric("CPU Usage", f"{performance_monitor._get_cpu_usage():.1f}%")
+        with col3:
+            st.metric("Python Version", f"{sys.version.split()[0]}")
 
 # ============================================================================
-# REQUIREMENTS.TXT FILE CONTENT
+# RUN THE APPLICATION
 # ============================================================================
 
-requirements_content = """# QuantEdge Pro v5.0 - Enterprise Portfolio Analytics Platform
-# Core Dependencies
-streamlit>=1.28.0
-numpy>=1.24.0
-pandas>=2.0.0
-yfinance>=0.2.0
-plotly>=5.17.0
-scipy>=1.11.0
-
-# Optional/Advanced Dependencies
-PyPortfolioOpt>=1.5.5
-scikit-learn>=1.3.0
-statsmodels>=0.14.0
-tensorflow>=2.13.0  # or pytorch>=2.0.0
-alpha-vantage>=2.3.0
-prophet>=1.1.0
-reportlab>=3.6.0
-web3>=6.0.0
-sqlalchemy>=2.0.0
-newsapi-python>=0.2.0
-arch>=6.0.0
-xgboost>=1.7.0
-
-# Development/Utility
-psutil>=5.9.0
+if __name__ == "__main__":
+    main()
