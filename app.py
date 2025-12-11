@@ -1,5 +1,5 @@
 # ==============================================================================
-# QuantEdge Pro v10 - THE ULTIMATE MASTER SUITE
+# QuantEdge Pro v10 - THE ULTIMATE MASTER SUITE (FINAL)
 # ==============================================================================
 # Description:
 #   This is the fully-featured, institutional-grade Portfolio Management System.
@@ -123,7 +123,7 @@ class AssetUniverse:
         return {
             "BIST 30 (Core Industrial & Holding)": lambda df: df[
                 (df["region"] == "TR") & 
-                (df["sector"].isin(["Transportation", "Energy", "Materials", "Industrials", "Consumer", "Defense", "Conglomerate", "Automotive", "Telecom", "Mining"]))
+                (df["sector"].isin(["Transportation", "Energy", "Materials", "Industrials", "Consumer", "Defense", "Conglomerate", "Automotive", "Telecom", "Construction", "Mining"]))
             ],
             "TR Financial Complex (Bank/Ins/Leas/Fact)": lambda df: df[
                 (df["region"] == "TR") & 
@@ -322,7 +322,7 @@ class RiskEngine:
 # 6. STRESS TESTING LAYER
 # ==============================================================================
 class StressTestEngine:
-    """Backtests portfolio against specific historical crisis periods."""
+    """Backtests portfolio weights against specific historical crisis periods."""
     
     EVENTS = {
         "2023 TR Elections Volatility": ("2023-04-01", "2023-06-15"),
@@ -355,7 +355,7 @@ class StressTestEngine:
                 valid_assets = [t for t in tickers if t in period.columns]
                 if not valid_assets: continue
                 
-                # Normalize weights
+                # Normalize weights for valid assets only
                 w_vec = np.array([weights.get(t, 0) for t in valid_assets])
                 if w_vec.sum() > 0:
                     w_vec = w_vec / w_vec.sum()
